@@ -49,7 +49,6 @@ from timeit import repeat
 import numpy as np
 import math
 import time
-from path_track_3 import LineofSightfirst
 
 
 #from OtterSimulator.control import PIDpolePlacement
@@ -318,6 +317,7 @@ class Otter:
         nu = nu + sampleTime * nu_dot
         n = n + sampleTime * n_dot
         self.trim_moment = self.trim_moment + sampleTime * trim_dot
+
         u_actual = np.array(n, float)
 
         return nu, u_actual
@@ -460,12 +460,9 @@ def heading_control(setpoint):
     global pre_error_heading 
     global saturation_limit_speed_max
     global saturation_limit_speed_min
-    global prev_heading
-    
+
     feed_back = heading
     error = setpoint-feed_back
-    # if abs(error)<0.25:
-    #     error=0
     print('error:',error)
     
     print('heading',feed_back)
@@ -478,16 +475,15 @@ def heading_control(setpoint):
     dt  = 0.02 
     ## PID  
     ## Proportion
-    Up = -5.5*error
+    Up = -3.5*error    # -2 de salınım olmuyor fakat sistem yavaş 
 
     ## Derivative
-    # Ud = 10*(error-pre_error_heading)
-    Ud = 0*(current_eta[-1]-prev_heading) # Aracın açısal konum farkından deribvative etkisi sisteme eklenir. Derivative kick etkisini azaltmak için.
+    Ud =10*(error-pre_error_heading)
     
 
-    ## Integral 
-    ki=100
-    Ui =  ki* (error+pre_error_speed)*dt
+    ## Integral
+    ki = 0
+    Ui =  ki* (error+pre_error_speed)*dt/2 
 
     if Ui<saturation_limit_speed_max:
             Ui = Ui+  ki* (error+pre_error_speed)*dt/2 
@@ -504,15 +500,15 @@ def heading_control(setpoint):
     # return 100
 
 def speed_control(set_point):
+    
+
     global nu
     global pre_error_speed
     global U_i
     global saturation_limit_speed_max
     global saturation_limit_speed_min
     global U_sat_old
-    global prev_x
-    global prev_y
-    
+
     vehicle_velocity=math.sqrt(nu[0]**2+nu[1]**2)
     error=set_point-vehicle_velocity
     if set_point==0:
@@ -521,22 +517,17 @@ def speed_control(set_point):
             pass
     dt = 0.02
     normal = 1
-    if abs(error)<0.15:
-        error=0
     ## FPID
     # Feedforward 
     U_f = (3.684*set_point**3-23.44*set_point**2+67.35*set_point+12.3)
     ## Proportion 
-    U_p = 20*error  # 3 default nolmal0 =3  nolmal1=
-    """Propetionu 12 yaptığımda control sinyali çıktısı değerinde aşım oluşmakta fakat hızlı bir oturma gerçekleşmektedir."""
+    U_p = 1*error  # 3 default 
     print('U_proportion',U_p)
     ## derivative 
-    # U_d = 5*(error-pre_error_speed)   # 1 default 
-    U_d = 0 * math.sqrt((prev_x-current_eta[0])**2+(prev_y-current_eta[1])**2) ## Konum farkları alınarak türev oluşturulur  
-                                                                               ## Derivative kick etkisini en aza indirmek için.
+    U_d = 0*(error-pre_error_speed)   # 1 default 
     ## integral 
-    U_i = 100* (error+pre_error_speed)*dt/2  # 0.25 default nolmal0 =0.3  nolmal1=
-    """İntegrator değerini 1000 yaptığımızda kontrolcü sinyalınde aşım olmakta aynı zamanda hızlı bir şekilde ref. hıza oturmaktadır."""
+    U_i = 0.25* (error+pre_error_speed)*dt/2  # 0.25 default 
+
     if normal ==1:
 
         if U_i<saturation_limit_speed_max:
@@ -544,15 +535,15 @@ def speed_control(set_point):
 
         else :
             pass
-        ## control signal
-            
+        ## control signal     
         u_avg = U_f+U_p+U_d+U_i
         pre_error_speed=error
         
+
         return u_avg
-        
 
     elif normal==0:
+
         U_sat =U_sat_old + U_i
         U_sat_old=U_sat
         ## control signal 
@@ -568,45 +559,46 @@ def speed_control(set_point):
 
         return U_filt
 
-def filtred_referans(pre_speed_ref,speed_ref,filtred_signal,delta_rate=0.03):
+# def speed_control(set_point):
 
-    if pre_speed_ref == filtred_signal:
-        print('1')
-        pre_speed_ref = filtred_signal
-    else:
-        if filtred_signal<speed_ref:
-            print('2')
-            filtred_signal = filtred_signal+delta_rate
-            if filtred_signal>speed_ref:
-                print('3')
-                filtred_signal=speed_ref
-        elif filtred_signal>speed_ref:
-            filtred_signal = filtred_signal - delta_rate
-            
-            if filtred_signal<speed_ref:
-                filtred_signal=filtred_signal
+#     global nu
+#     global pre_error_speed
+#     global U_i
+#     global saturation_limit_speed_max
+#     global saturation_limit_speed_min
+#     global U_sat_old
 
-        else:
-            filtred_signal=speed_ref
-    return filtred_signal
+#     vehicle_velocity=math.sqrt(nu[0]**2+nu[1]**2)
+#     error=set_point-vehicle_velocity
+#     if set_point==0:
+#             set_point=0.0001
+#     else:
+#             pass
+#     dt = 0.02
 
-def filtred_heading_referans(pre_speed_ref,speed_ref,filtred_signal):
+#     ## FPID
+#     # Feedforward 
+#     U_f = (3.684*set_point**3-23.44*set_point**2+67.35*set_point+12.3)
+#     ## Proportion 
+#     U_p = 3*error
+#     ## derivative 
+#     U_d = 0*(error-pre_error_speed)
+#     ## integral 
+#     U_i = 0* (error+pre_error_speed)*dt/2
+#     U_sat =U_sat_old + U_i
+#     U_sat_old=U_sat
+#     ## control signal 
+#     u_avg = U_f+U_p+U_d+U_sat
+#     ## Saturation
+#     U_filt=max(min(u_avg, saturation_limit_speed_max), saturation_limit_speed_min)
+#     if u_avg!=U_filt:
+#         U_sat_old = U_filt-U_p-U_f
 
-    if pre_speed_ref== filtred_signal:
-        pre_speed_ref = filtred_signal
+#     pre_error_speed=error
 
-    elif speed_ref-filtred_signal<(filtred_signal-speed_ref):
-        filtred_signal = filtred_signal+0.36
-        if filtred_signal>speed_ref:
-            print('3')
-            filtred_signal=speed_ref
-    elif  speed_ref-filtred_signal>(filtred_signal-speed_ref):
-        filtred_signal = filtred_signal - 0.36
-        if filtred_signal<speed_ref:
-                filtred_signal=speed_ref
-    else:
-        filtred_signal=speed_ref
-    return filtred_signal
+
+    # return U_filt
+    
 
 
 import matplotlib.pyplot as plt
@@ -616,31 +608,14 @@ if __name__ == "__main__":
     start(0.02)
     # Wpx = [10,20,30,40]
     # Wpy = [10,20,10,20]
-    # Wpx = [10,20,30,20]
-    # Wpy = [10,20,30,40]
-    Wpx = [10,30,50,70]
-    Wpy = [10,20,10,40]
-    ### non-index method
-    # Wpx = [10,20,30,40]
-    # Wpy = [10,10,10,10] 
-    
-
+    Wpx = [10,20,30,20]
+    Wpy = [10,20,30,40]
     e,a,b,c,d = generate_curve(Wpx,Wpy,0.01)
     # Wpx = [10,20,20]
     # Wpy = [10,10,30]
-    
-
-    los2 = LineofSight()
-    los  = LineofSightfirst()
-    index = True
-    if index==True:
-        print('LOS 2 Method' )
-        method=los2
-    elif index==False:
-        print('LOS Method')
-        method=los
+    los2=LineofSight()
     R_cal=R_Calculator()
-  
+    stanley=Stanley()
     x_list=[]
     y_list=[]
     d_list=[]
@@ -652,8 +627,8 @@ if __name__ == "__main__":
     
     prev_heading=0
     ds = 0.01 #[m]
-    coeff = method.path_generate(Wpx,Wpy)
-
+    coeff = los2.path_generate(Wpx,Wpy)
+    coeff = stanley.path_generate(Wpx,Wpy)
     v_list=[]
     head_list=[]
     timeOtter=[]
@@ -662,16 +637,9 @@ if __name__ == "__main__":
     u_control_iskele = []
     pervane_sancak = []
     pervane_iskele = []
-    eta_list=[]
     Time=0
     chi_d_list = []
     actualheading_list = []
-    x_closest_list=[]
-    y_closest_list=[]
-    x_los_list=[]
-    y_los_list=[]
-    x_closest=[]
-    y_closest=[]
     ramp_signal=0
     Iramp_signal=0
     Sramp_signal=0
@@ -681,35 +649,61 @@ if __name__ == "__main__":
     sramp_signal=0
     prev_u_control = [0,0]
     pp_u_control = 0#[0,0]
-    prev_speed_ref=0.0
-    prev_heading_ref=0.0
-    filtred_signal=0.1
-    heading_filtred_signal=0.1
     for i in range(4000):
-        if index==True:
-            print('LOS 2 Method' )
-      
-        elif index==False:
-            print('LOS Method')
         
         Time+=0.02
         timeOtter.append(Time)
         time1=time.time()
-        output=method.execute(nu,current_eta,Wpx,Wpy)
-        refU=output['U_desired']
-        refChi=math.degrees(output['chi_d'])%360
-        filtred_signal= filtred_referans(prev_speed_ref,refU,filtred_signal)
-        heading_filtred_signal= filtred_heading_referans(prev_heading_ref,refChi,heading_filtred_signal)
-
-        U_diff = heading_control(heading_filtred_signal) # controlller
-        path_curv_radius=R_cal.R_cal(current_eta)
-        # U_desired = speed_generate(path_curv_radius,U_diff) # adaptive curve 
-       
-        u_avg = speed_control(filtred_signal)  # linear speed control 
-
+ 
+        output=stanley.execute(nu,current_eta,Wpx,Wpy)
         
+        print('set point:',math.degrees(output['chi_d'])%360)
+        U_diff = heading_control(math.degrees(output['chi_d'])%360) # controlller
+        refChi=math.degrees(output['chi_d'])%360
+        path_curv_radius=R_cal.R_cal(current_eta)
+        U_desired = speed_generate(path_curv_radius,U_diff) # adaptive curve 
+        refU=output['U_desired']
+        u_avg = speed_control(refU)  # linear speed control 
         u_control=control_allocation(u_avg,U_diff) # adjust req. thrust for each thruster.
-    
+        ### RAMPA SINYALI-KONTROL SINYALI ARTISI-RATE LIMITI ICIN  
+
+        if prev_u_control[1]==u_control[1]:
+            prev_u_control[1] = u_control[1]
+        else:    
+            if iramp_signal<u_control[1]:
+                iramp_signal=iramp_signal+1.25
+                if iramp_signal>u_control[1]:
+                    iramp_signal=u_control[1]
+
+            elif iramp_signal>u_control[1]:
+                
+                iramp_signal=iramp_signal-1.25
+                if iramp_signal<u_control[1]:
+                    iramp_signal=u_control[1]
+            else:
+                iramp_signali=u_control[1]
+
+        if prev_u_control[0]==u_control[0]:
+            prev_u_control[0] = u_control[0]
+        else:    
+            if sramp_signal<u_control[0]:
+                
+                sramp_signal=sramp_signal+1.25
+                if sramp_signal>u_control[0]:
+                    sramp_signal=u_control[0]
+
+            elif sramp_signal>u_control[0]:
+                
+                sramp_signal=sramp_signal-1.25
+                if sramp_signal<u_control[0]:
+                    sramp_signal=u_control[0]
+            else:
+                sramp_signals=u_control[0]
+        #####
+
+        u_control=[sramp_signal,iramp_signal]
+        #####
+
         output=function(u_control) # runnig dynamic model of usv (otter)
 
 
@@ -717,39 +711,29 @@ if __name__ == "__main__":
         head_list.append(current_eta[5]*180/math.pi %360) # for plotting
         x_list.append(current_eta[0]) # for plotting 
         y_list.append(current_eta[1]) # for plotting 
-        eta_list.append(current_eta)
         ref_speed.append(refU)
         u_control_sancak.append(u_control[0])
         u_control_iskele.append(u_control[1])
-        x_closest_list.append(method.x_closest)
-        y_closest_list.append(method.y_closest)
-        x_los_list.append(method.x_los)
-        y_los_list.append(method.y_los)
         pervane_iskele.append(output[2][1])
         pervane_sancak.append(output[2][0])
         chi_d_list.append(refChi)
         actualheading_list.append(heading)
 
-        
+
         
         radius=R_cal.R_cal(current_eta)
 
-        # method.los_simulation(current_eta,Wpx,Wpy,u_control)
+        stanley.los_simulation(current_eta,Wpx,Wpy,u_control)
+        
 
 
-        if method.x_los==method.x_closest and method.y_los == method.y_closest:
 
+       
+        if   stanley.x_los==stanley.x_closest and stanley.y_los == stanley.y_closest: 
+            print('xxxxxxxxx') 
             break 
         
         
-
-    # ani=los2.animate(x_list,y_list,head_list,Wpx,Wpy,x_closest_list,y_closest_list,x_los_list,y_los_list,u_control,i)
-    # figure, ax = plt.subplots()
-    # animation = FuncAnimation(figure,
-    #                       func = ani,
-    #                       frames = np.arange(0, 10, 0.1), 
-    #                       interval = 10)
-    # plt.show()
         
     print(u_control_sancak)        
     print('yyyyyyyyyy')  

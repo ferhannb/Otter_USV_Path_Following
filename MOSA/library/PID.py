@@ -43,11 +43,10 @@ Author:     Thor I. Fossen
 """
 
 
+from ctypes import create_unicode_buffer
 import numpy as np
 import math
 import time
-
-
 
 #from OtterSimulator.control import PIDpolePlacement
 #from OtterSimulator.gnc import Smtrx, Hmtrx, m2c, crossFlowDrag, sat, attitudeEuler
@@ -255,10 +254,8 @@ class Otter:
         CA[5, 1] = 0  # if nonzero, must be balanced by adding nonlinear damping
 
         self.C = CRB + CA
-
         # Ballast
         g_0 = np.array([0.0, 0.0, 0.0, 0.0, self.trim_moment, 0.0])
-
         # Control forces and moments - with propeller revolution saturation
         thrust = np.zeros(2)
         for i in range(0, 2):
@@ -282,7 +279,6 @@ class Otter:
             ]
         )
         
-
         # Hydrodynamic linear damping + nonlinear yaw damping
         tau_damp = -np.matmul(self.D, nu_r)
         tau_damp[5] = tau_damp[5] - 10 * self.D[5, 5] * abs(nu_r[5]) * nu_r[5]
@@ -305,8 +301,9 @@ class Otter:
         trim_dot = (self.trim_setpoint - self.trim_moment) / 5  # trim dynamics
 
         # Forward Euler integration [k+1]
+
         nu = nu + sampleTime * nu_dot
-        n = n + sampleTime * n_dot
+        n  = n + sampleTime * n_dot
         self.trim_moment = self.trim_moment + sampleTime * trim_dot
 
         u_actual = np.array(n, float)
@@ -335,7 +332,6 @@ class Otter:
         # if iteration > int(length/2):
         #     n1 = 50
         #     n2 = 50
-
         u_control = np.array([n1, n2], float)
 
         return u_control
@@ -370,13 +366,24 @@ def start(steptime):
     global saturation_limit_speed_max
     global saturation_limit_speed_min
     global U_sat_old
-   
+    global pre_error_heading
+    global filtred_signal
+    global pre_speed_referans 
+    global prev_x
+    global prev_y
+    global prev_heading
+
+    prev_x = 0
+    prev_y = 0
+    prev_heading = 0
+    pre_speed_referans = 0
+    filtred_signal = 0 
     saturation_limit_speed_max = 104
     saturation_limit_speed_min = -104
     U_sat_old = 0
     U_i = 0
     pre_error_speed = 0
-
+    pre_error_heading = 0
 
     nu = np.array([0, 0, 0, 0, 0, 0], float)
     u_actual = np.array([0, 0], float)
@@ -385,7 +392,7 @@ def start(steptime):
     heading=current_eta[5]*180/math.pi %360
     speed = math.sqrt(nu[0]**2+nu[1]**2)
     sampleTime=steptime
-
+    
     return
 
 def function(u_control):
@@ -439,38 +446,115 @@ def control_allocation(u_avr,u_diff):
 def heading_control(setpoint):
     global current_eta
     global heading
-
+    global pre_error_heading 
+    global saturation_limit_speed_max
+    global saturation_limit_speed_min
+    global prev_heading
+    
     feed_back = heading
-    print('FEEDBACK',feed_back)
-    print('HEADING',heading)
     error = setpoint-feed_back
-    print('ERROR',error)
+    if abs(error)<0.25:
+        error=0
+    print('error:',error)
+    
+    print('heading',feed_back)
     while error<-180:
         error = error +360
     while error > 180:
         error = error -360
 
-    Up = -5*error
-    u_diff = Up
+    
+    dt  = 0.02 
+    ## PID  
+    ## Proportion
+    Up = -6*error
 
-    heading=current_eta[5]*180/math.pi %360
+    ## Derivative
+    # Ud = 10*(error-pre_error_heading)
+    Ud = 20*(current_eta[-1]-prev_heading) # Aracın açısal konum farkından deribvative etkisi sisteme eklenir. Derivative kick etkisini azaltmak için.
     
 
-    return u_diff
+    ## Integral 
+    ki=125
+    Ui =  ki* (error+pre_error_speed)*dt
+
+    if Ui<saturation_limit_speed_max:
+            Ui = Ui+  ki* (error+pre_error_speed)*dt/2 
+    else :
+        pass           
+
+    ## control signal 
+    u_diff = Up+Ud+Ui
+    pre_error = error
+    heading=current_eta[5]*180/math.pi %360
+    print('pre error:',pre_error)
+    pre_error_heading=error
+    return u_diff,error
+
+# def heading_control(setpoint):
+#     global current_eta
+#     global heading
+
+#     feed_back = heading
+#     print('FEEDBACK',feed_back)
+#     print('HEADING',heading)
+#     error = setpoint-feed_back
+#     print('ERROR',error)
+#     while error<-180:
+#         error = error +360
+#     while error > 180:
+#         error = error -360
+
+#     Up = -5*error
+#     u_diff = Up
+
+#     heading=current_eta[5]*180/math.pi %360
+    
+
+#     return u_diff
     # return 100
 
 
 
-def speed_control(set_point):
-    
 
+
+def control_allocation(u_avr,u_diff):
+    max_frw_rpm = 104
+    max_rvs_rpm = -104
+    global u_control
+
+    if u_avr>max_frw_rpm:
+        u_avr=max_frw_rpm
+    elif u_avr<max_rvs_rpm:
+        u_avr=max_rvs_rpm
+    # print('u_avr---',u_avr)
+    n1=u_avr-u_diff
+    n2=u_avr+u_diff
+
+    if n1>max_frw_rpm:
+        n1=max_frw_rpm
+    if n1<max_rvs_rpm:
+        n1=max_rvs_rpm
+    if n2>max_frw_rpm:
+        n2=max_frw_rpm   
+    if n2<max_rvs_rpm:
+        n2=max_rvs_rpm
+
+    u_control=[n1,n2]
+    
+    return u_control
+
+
+def speed_control(set_point):
     global nu
     global pre_error_speed
     global U_i
     global saturation_limit_speed_max
     global saturation_limit_speed_min
     global U_sat_old
-
+    global prev_x
+    global prev_y
+    
     vehicle_velocity=math.sqrt(nu[0]**2+nu[1]**2)
     error=set_point-vehicle_velocity
     if set_point==0:
@@ -479,17 +563,22 @@ def speed_control(set_point):
             pass
     dt = 0.02
     normal = 1
+    if abs(error)<0.15:
+        error=0
     ## FPID
     # Feedforward 
     U_f = (3.684*set_point**3-23.44*set_point**2+67.35*set_point+12.3)
     ## Proportion 
-    U_p = 10*error  # 3 default nolmal0 =3  nolmal1=
+    U_p = 20*error  # 3 default nolmal0 =3  nolmal1=
+    """Propetionu 12 yaptığımda control sinyali çıktısı değerinde aşım oluşmakta fakat hızlı bir oturma gerçekleşmektedir."""
     print('U_proportion',U_p)
     ## derivative 
-    U_d = 200*(error-pre_error_speed)   # 1 default 
+    # U_d = 5*(error-pre_error_speed)   # 1 default 
+    U_d = 0 * math.sqrt((prev_x-current_eta[0])**2+(prev_y-current_eta[1])**2) ## Konum farkları alınarak türev oluşturulur  
+                                                                               ## Derivative kick etkisini en aza indirmek için.
     ## integral 
-    U_i = 00* (error+pre_error_speed)*dt/2  # 0.25 default nolmal0 =0.3  nolmal1=
-
+    U_i = 100* (error+pre_error_speed)*dt/2  # 0.25 default nolmal0 =0.3  nolmal1=
+    """İntegrator değerini 1000 yaptığımızda kontrolcü sinyalınde aşım olmakta aynı zamanda hızlı bir şekilde ref. hıza oturmaktadır."""
     if normal ==1:
 
         if U_i<saturation_limit_speed_max:
@@ -497,11 +586,12 @@ def speed_control(set_point):
 
         else :
             pass
-        ## control signal     
+        ## control signal
+            
         u_avg = U_f+U_p+U_d+U_i
         pre_error_speed=error
         
-        return u_avg
+        return u_avg,error
         
 
     elif normal==0:
@@ -518,11 +608,11 @@ def speed_control(set_point):
         pre_error_speed=error
 
 
-        return U_filt
+        return U_filt,error
     
 # def speed_control(set_point):
 
-#     global nu
+#     global nu 
 #     vehicle_velocity=math.sqrt(nu[0]**2+nu[1]**2)
 #     error=set_point-vehicle_velocity
 #     if set_point==0:
@@ -535,7 +625,7 @@ def speed_control(set_point):
 #     # print('u_avg',u_avg)
 #     return u_avg
 
-def rampfunction(filtre_signal,u_control,prev_u_control,pp_u_control):
+def rampfunction(filtre_signal,u_control,prev_u_control,pp_u_control,inc_rate=1.25):
     if prev_u_control==u_control:
             
             pp_u_control = u_control
@@ -543,18 +633,84 @@ def rampfunction(filtre_signal,u_control,prev_u_control,pp_u_control):
         if prev_u_control<u_control:
             print('*******')
             if u_control-pp_u_control>0:
-                filtre_signal=filtre_signal+1.25
+                filtre_signal=filtre_signal+inc_rate
                 if filtre_signal>u_control:
                      filtre_signal=u_control
 
         elif prev_u_control>u_control:
             if u_control-pp_u_control>0:
-                filtre_signal=filtre_signal-1.25
+     
+                filtre_signal=filtre_signal-inc_rate
                 if filtre_signal<u_control:
                      filtre_signal=u_control
        
-     
     return  pp_u_control,filtre_signal,prev_u_control
+
+
+def filtred_referans(pre_speed_ref,speed_ref,filtred_signal,delta_rate=0.03):
+
+    if pre_speed_ref == filtred_signal:
+        print('1')
+        pre_speed_ref = filtred_signal
+    else:
+        if filtred_signal<speed_ref:
+            print('2')
+            filtred_signal = filtred_signal+delta_rate
+            if filtred_signal>speed_ref:
+                print('3')
+                filtred_signal=speed_ref
+        elif filtred_signal>speed_ref:
+            print('444444444444444444444444444444444444444')
+            filtred_signal = filtred_signal - delta_rate
+            
+            if filtred_signal<speed_ref:
+                filtred_signal=filtred_signal
+
+        else:
+            filtred_signal=speed_ref
+
+    
+
+    return filtred_signal
+
+def filtred_heading_referans(pre_speed_ref,speed_ref,filtred_signal):
+
+    
+
+    if speed_ref-filtred_signal<0:
+        if (speed_ref-filtred_signal)%360<(filtred_signal-speed_ref):
+
+            filtred_signal = filtred_signal+0.36
+            if filtred_signal>0:
+
+                if (-filtred_signal)%360>speed_ref:
+                    filtred_signal=speed_ref
+        elif  (speed_ref-filtred_signal)%360>(filtred_signal-speed_ref):
+
+            filtred_signal = filtred_signal - 0.36
+            if filtred_signal<0:
+                if (filtred_signal%360)>speed_ref:
+                    filtred_signal=speed_ref
+    elif speed_ref-filtred_signal>0:
+        if (speed_ref-filtred_signal)<(filtred_signal-speed_ref)%360:
+            filtred_signal = filtred_signal+0.36
+            if (filtred_signal)>0:
+                if filtred_signal>speed_ref:
+                    filtred_signal=speed_ref
+        elif  (speed_ref-filtred_signal)>(filtred_signal-speed_ref)%360:
+
+            filtred_signal = filtred_signal - 0.36
+            if filtred_signal<0:
+
+                if (filtred_signal%360)<speed_ref:
+                        filtred_signal=speed_ref
+        
+        
+    return filtred_signal
+
+
+
+
 
     
 import math
@@ -579,9 +735,9 @@ if __name__ == "__main__":
     timeotter = []
     u_actual_list =[]
     Time = 0
-   
+    u_actual_list_sancak=[]
+    u_actual_list_iskele=[]
     rad=100
-    print(0.0002667*rad**2+0.002234*rad-0.05117)
     r2rpmcoeff=0.104719755
     command_speed = []
     controlsignal_sancak = []
@@ -589,7 +745,7 @@ if __name__ == "__main__":
     heading_list = []
     heading_signal_list = []
     yaw_speed = []
-    output=[[]]
+    heading_ref = []
     ramp_signal=0
     Iramp_signal=0
     Sramp_signal=0
@@ -599,124 +755,164 @@ if __name__ == "__main__":
     sramp_signal=0
     prev_u_control = [0,0]
     pp_u_control = 0#[0,0]
-
+    prev_speed_ref = 0
+    prev_heading_ref = heading
+    filtred_signal = 0.1
+    heading_filtred_signal = 0.01
+    pre_speed = []
+    ref_list = []
+    speed_error_list = []
+    heading_error_list = []
+ 
+ 
     for i in range(3000):
+
         Time+=0.02
-        if i<500:
-            U_desired=2.5
-        elif 500<=i<1000:
-            U_desired=.5
-        elif 1000<=i<1500:  
-            U_desired = 1.5
-        elif 1500<=i<2000:
-            U_desired = 2.5
-        elif 2000<=i<2500:
-            U_desired = 1
-
-
-        else:
-            U_desired=3*math.sin(0.005*i)
-            if U_desired<=0:
-                U_desired=abs(U_desired)
-        
-        
-        # if i<=500:
-        #     U_desired=1.5
+        # if i<500:
+        #     U_desired=1
         # elif 500<=i<1000:
-        #     U_desired=2.2
+        #     U_desired=1.8
+        # elif 1000<=i<1500:  
+        #     U_desired = 3
+        # elif 1500<=i<2000:
+        #     U_desired = 1.25
+        # elif 2000<=i<2500:
+        #     U_desired = 2
         # else:
-        #     U_desired=2    
-        heading_ref = 60
+        #     U_desired = 0
+
+        if i<5:
+            heading_ref=50
+        elif 5<=i<1000:
+            heading_ref=50
+        elif 1000<=i<1500:  
+            heading_ref = 320
+        elif 1500<=i<2000:
+            heading_ref = 320
+        elif 2000<=i<2500:
+            heading_ref = 100
+        else:
+            heading_ref =100
+        
+        # else:
+        #     U_desired=30*math.sin(0.005*i)
+        #     if U_desired<=0:
+        #         U_desired=abs(U_desired)
+        
+        
+
+        U_desired = 0
+        # heading_ref = 50
+        
+        filtred_signal= filtred_referans(prev_speed_ref,U_desired,filtred_signal)
+        heading_filtred_signal= filtred_heading_referans(prev_heading_ref,heading_ref,heading_filtred_signal)
+        prev_speed_ref = U_desired
+        prev_heading_ref = heading_ref
+        prev_x = current_eta[0]
+        prev_y = current_eta[1]
+        prev_heading = current_eta[-1]
+        pre_speed_ref=U_desired
+        pre_speed.append(pre_speed_ref)
+        u_avg,error_speed  = speed_control(filtred_signal)  # linear speed control
+        heading_signal,error_heading = heading_control(heading_filtred_signal)
+        u_control = control_allocation(60,heading_signal)
 
 
-
-        heading_signal = heading_control(heading_ref)
-        u_avg = speed_control(U_desired)  # linear speed control
-        u_control = control_allocation(u_avg,0)
         ### RAMPA SINYALI-KONTROL SINYALI ARTISI-RATE LIMITI ICIN  
 
-        if prev_u_control[1]==u_control[1]:
-            prev_u_control[1] = u_control[1]
-        else:    
-            if iramp_signal<u_control[1]:
-                iramp_signal=iramp_signal+1.25
-                if iramp_signal>u_control[1]:
-                    iramp_signal=u_control[1]
+        # if prev_u_control[1]==u_control[1]:
+        #     prev_u_control[1] = u_control[1]
+        # else:    
+        #     if iramp_signal<u_control[1]:
+        #         iramp_signal=iramp_signal+1.25
+        #         if iramp_signal>u_control[1]:
+        #             iramp_signal=u_control[1]
 
-            elif iramp_signal>u_control[1]:
+        #     elif iramp_signal>u_control[1]:
                 
-                iramp_signal=iramp_signal-1.25
-                if iramp_signal<u_control[1]:
-                    iramp_signal=u_control[1]
-            else:
-                iramp_signali=u_control[1]
+        #         iramp_signal=iramp_signal-1.25
+        #         if iramp_signal<u_control[1]:
+        #             iramp_signal=u_control[1]
+        #     else:
+        #         iramp_signali=u_control[1]
 
-        if prev_u_control[0]==u_control[0]:
-            prev_u_control[0] = u_control[0]
-        else:    
-            if sramp_signal<u_control[0]:
+        # if prev_u_control[0]==u_control[0]:
+        #     prev_u_control[0] = u_control[0]
+        # else:    
+        #     if sramp_signal<u_control[0]:
                 
-                sramp_signal=sramp_signal+1.25
-                if sramp_signal>u_control[0]:
-                    sramp_signal=u_control[0]
+        #         sramp_signal=sramp_signal+1.25
+        #         if sramp_signal>u_control[0]:
+        #             sramp_signal=u_control[0]
 
-            elif sramp_signal>u_control[0]:
+        #     elif sramp_signal>u_control[0]:
                 
-                sramp_signal=sramp_signal-1.25
-                if sramp_signal<u_control[0]:
-                    sramp_signal=u_control[0]
-            else:
-                sramp_signals=u_control[0]
-        #####
+        #         sramp_signal=sramp_signal-1.25
+        #         if sramp_signal<u_control[0]:
+        #             sramp_signal=u_control[0]
+        #     else:
+        #         sramp_signals=u_control[0]
+        # #####
 
-        u_control=[sramp_signal,iramp_signal] # [sancak rpm,iskele rpm]
-
+        #u_control=[sramp_signal,iramp_signal] # [sancak rpm,iskele rpm]
+        # u_control =[104,-104]
         # Ipp_u_control,Iramp_signal,prevI=rampfunction(Iramp_signal,u_control[0],prev_u_control[0],Ipp_u_control)
         # Ipp_u_control2=Ipp_u_control
         # Spp_u_control,Sramp_signal,prevS=rampfunction(Sramp_signal,u_control[1],prev_u_control[1],Spp_u_control)
         # Spp_u_control2=Spp_u_control
         # u_control=[Iramp_signal,Sramp_signal]
         output=function(u_control) # runnig dynamic model of usv (otter)
-        prev_u_control=u_control
+        # prev_u_control=u_control
         
  
-        u_actual_list.append(output[2][0])
+        u_actual_list_sancak.append(output[2][0])
+        u_actual_list_iskele.append(output[2][1])
+
         # command_speed.append(0.0002786*u_control[0]**2+0.0005187*u_control[0]-0.00461)
-        command_speed.append(U_desired)
+        command_speed.append(filtred_signal)
         v_list.append(np.sqrt(nu[0]**2+nu[1]**2))  # for plotting
         heading_list.append(current_eta[5]*180/math.pi %360) # for plotting
-        heading_signal_list.append(heading_ref)
+        heading_signal_list.append(heading_filtred_signal)
         x_list.append(current_eta[0]) # for plotting 
         y_list.append(current_eta[1]) # for plotting 
         yaw_speed.append(nu[5])
         # u_control=[-70,100]
         controlsignal_sancak.append(u_control[0])
         controlsignal_iskele.append(u_control[1])
-        
+        heading_error_list.append(error_heading)
+        speed_error_list.append(error_speed)    
         timeotter.append(Time)
 
                 
     import matplotlib.pyplot as plt 
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
-    import plotly
-    # plt.plot(timeotter,yaw_speed)
+    # plt.plot(speed_error_list)
+    # # plt.plot(timeotter,yaw_speed)
     # plt.show()
     fig = go.Figure()
     fig = make_subplots(rows=4, cols=1)
     # Add traces
     fig.add_trace(go.Scatter(x=timeotter, y=v_list,
                         mode='lines',
-                        name='araç hiz'))
+                        name='araç hiz'),row=1, col=1)
     fig.add_trace(go.Scatter(x=timeotter, y=command_speed,
                         mode='lines',
                         name='cmd hiz'),row=1, col=1)
 
     
 
+    fig.add_trace(go.Scatter(x=timeotter, y=speed_error_list,
+                        mode='lines',
+                        name='speed error'),row=1, col=1)
+
     fig.add_trace(
-        go.Scatter(x=timeotter, y=u_actual_list,name='actual pervane'),row=2, col=1
+        go.Scatter(x=timeotter, y=u_actual_list_sancak,name=' Sancak pervane'),row=2, col=1
         )
+    
+    fig.add_trace(
+        go.Scatter(x=timeotter, y=u_actual_list_iskele,name='İskele Pervane'),
+        row=2, col=1)
 
     fig.add_trace(
         go.Scatter(x=timeotter, y=controlsignal_sancak,name='control signali_sancak'),
@@ -726,8 +922,14 @@ if __name__ == "__main__":
         go.Scatter(x=timeotter, y=controlsignal_iskele,name='control signali_iskele'),
         row=2, col=1)
 
+    
+
     fig.add_trace(
-        go.Scatter(x=timeotter, y=heading_signal_list,name='heading signali'),
+        go.Scatter(x=timeotter, y=heading_signal_list,name='heading referans signali'),
+        row=3, col=1)
+    
+    fig.add_trace(
+        go.Scatter(x=timeotter, y=heading_error_list,name='heading error'),
         row=3, col=1)
 
     fig.add_trace(

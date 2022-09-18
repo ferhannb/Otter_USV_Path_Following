@@ -1,5 +1,4 @@
 
-from email.utils import collapse_rfc2231_value
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as ph
@@ -14,7 +13,7 @@ import math
 
 
 
-class LineofSight():
+class Stanley():
 
     def __init__(self,select_path=0):
 
@@ -75,6 +74,10 @@ class LineofSight():
         self.y_closest_ = y_list[self.min_index]
 
         return self.x_closest_ , self.y_closest_
+    
+    
+
+        
 
 
    
@@ -132,25 +135,20 @@ class LineofSight():
        
         c=self.coeff[self.k].tolist()
 
-        ### Closest Point Method 
-        #1# 
-        # self.closest_point_minimizer(eta,c)
-        #2#
         self.x_closest, self.y_closest = self.closest_point(eta,self.init_x_curve,self.init_y_curve)
 
         if self.init_y_curve[self.min_index]==self.init_y_curve[-1]:
-            curve_slope_angle = self.curve_slope_angle_next
+            curve_slope_angle=self.curve_slope_angle_next
         else:
-            curve_slope_angle = math.atan2(self.init_y_curve[self.min_index+1]-self.init_y_curve[self.min_index],self.init_x_curve[self.min_index+1]-self.init_x_curve[self.min_index]) 
+            curve_slope_angle=math.atan2(self.init_y_curve[self.min_index+1]-self.init_y_curve[self.min_index],self.init_x_curve[self.min_index+1]-self.init_x_curve[self.min_index]) 
         
         self.curve_slope_angle_next=curve_slope_angle
         #cross-track error
         y_e=-(x_v-self.x_closest )*math.sin(curve_slope_angle)+(y_v- self.y_closest)*math.cos(curve_slope_angle) 
   
         # self.var_lookhead_distance=(self.delta_max-self.delta_min)*math.exp(-self.delta_k*y_e**2)+self.delta_min
-        path_curv_radius = self.R_calculator.R_cal(eta)
+        path_curv_radius=self.R_calculator.R_cal(eta)
         self.var_lookhead_distance = (abs(y_e)*self.delta_k)+self.delta_min#-path_curv_radius/100
-        
 
       ####################################################################
 
@@ -197,6 +195,8 @@ class LineofSight():
                 self.y_los = self.y_init[exact_index_location+self.min_index+wk]
 
             else:
+       
+            
                 print('X İNİT[[-1]',self.x_init[-1],'Y İNİT[[-1]',self.y_init[-1])
                 self.x_los = self.x_init[-1]
                 self.y_los = self.y_init[-1]
@@ -207,37 +207,43 @@ class LineofSight():
 
 
         # ########################## NORMAL LOS POINT  ##################################################
-        # self.x_los =  self.x_closest+ self.var_lookhead_distance*math.cos(curve_slope_angle)          #
-        # self.y_los =  self.y_closest + self.var_lookhead_distance*math.sin(curve_slope_angle)         #
-        # ###############################################################################################
+        # self.x_los =  self.x_closest+ self.var_lookhead_distance*math.cos(curve_slope_angle)
+        # self.y_los =  self.y_closest + self.var_lookhead_distance*math.sin(curve_slope_angle)
+        # ##############################################################################################
 
         d = np.sqrt((self.x_closest -self.x_los)**2+(self.y_closest-self.y_los)**2)
 
-
         self.chi_r=math.atan(-y_e/abs(d)) # los angle 
-
-        Beta = math.atan2(y_velocity,x_velocity)
-        self.chi_d=curve_slope_angle+self.chi_r-Beta # ref açı
+        #### Stenly Control 
 
 
-        # self.chi_d= math.atan2((self.y_los-y_v),(self.x_los-x_v))
+ 
+
+
+        self.chi_d= math.atan2((self.y_los-y_v),(self.x_los-x_v))
         error_angle=self.chi_d-eta[5] # açı hatası
 
         # referans hız değeri
         term1=abs(y_e)/self.y_max
-
         # print('term1',term1)
         term2=abs(error_angle)/self.chi_max
-   
         U_desired = max(self.U_max*(1-term1-term2),self.U_min)
         
+        #### tan(ke/(soften_value+v))
+        k_stanley  =1 
+        soften_stanley = 1 
+        rmp_diff = math.atan(y_e*k_stanley/(1+U_desired))
+        heading_diff = curve_slope_angle-eta[-1]
+
+        stanley_ref = max(-200, min(200, (rmp_diff + heading_diff)))
+    
         
         
 
         # U_desired = speed_generate(path_curv_radius,sapma) 
         print('U_Speed',U_desired)
         print('desired chid',math.degrees(self.chi_d)%360)
-        output = dict(error_angle=error_angle,U_desired=U_desired,y_e=y_e,chi_d=self.chi_d,x_los=self.x_los,y_los=self.y_los,Wpy=Wpy[self.k+1],Wpx=Wpx[self.k+1])
+        output = dict(Stanley_Ref=stanley_ref,error_angle=error_angle,U_desired=U_desired,y_e=y_e,chi_d=self.chi_d,x_los=self.x_los,y_los=self.y_los,Wpy=Wpy[self.k+1],Wpx=Wpx[self.k+1])
         return output
 
     # def los_simulation(self,eta,Wpx,Wpy,u_control,x_obs,y_obs,current_eta,OS_Arr,TS_Arr):
@@ -282,41 +288,13 @@ class LineofSight():
 
         plt.pause(0.0001)
 
-    def animate(self,x_list,y_list,heading_list,Wpx,Wpy,x_closest_list,y_closest_list,x_los_list,y_los_list,u_control,i):
-
-
-
-   
-        # plt.cla()
-        plt.xlim([0,40])
-        plt.ylim([0,40])
-        plt.plot(Wpx,Wpy,'ro',label='Waypoints')
-
-        # plt.gcf().gca().add_artist(plt.Circle((x_obs,y_obs),2,fill=False))
-
-        plt.plot(self.x_init,self.y_init,'m--')
-
-        plt.plot(self.x_pose, self.y_pose,"r--")
-
-        # plt.title([u_control[1],u_control[0],self.var_lookhead_distance,current_eta])
+    def animate(self,current_eta,Wpx,Wpy,u_control,i):
         
-        plt.plot(x_list[i],y_list[i],'bo',label='vahicle position')
-        # plt.title(u_control[i])
-        # plt.plot(OS_Arr[0],OS_Arr[1],'b-.')
+        anim=FuncAnimation(plt.clf(),self.los_simulation(current_eta,Wpx,Wpy,u_control),interval=1000,blit=True)
+    
+        plt.show()
 
-        # plt.plot(TS_Arr[0],TS_Arr[1],'c-.')
-
-        plt.plot(x_closest_list[i],y_closest_list[i],'co')
-        
-        # plt.plot([x_list[i],x_closest_list][i],[x_list[i],y_closest_list[i]],'g--',label='cross track error ')
-
-        plt.plot([x_closest_list[i],x_los_list[i]],[y_closest_list[i],y_los_list[i]],'m--',label='Varing Delta')
-
-        plt.plot(x_los_list[i],y_los_list[i],'ko')
-
-        plt.plot([x_list[i],x_list[i]+5*math.cos(heading_list[i])],[y_list[i],y_list[i]+5*math.sin(heading_list[i])])
-
-        
+        return anim
 
 
 

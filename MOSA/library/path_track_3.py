@@ -9,12 +9,13 @@ from R_calculation import R_Calculator
 from matplotlib.animation import FuncAnimation
 from itertools import chain
 from scipy.optimize import minimize
+import sympy as sm
 # from mpccontroller import MPCUSV 
 import math
 
 
 
-class LineofSight():
+class LineofSightfirst():
 
     def __init__(self,select_path=0):
 
@@ -75,9 +76,44 @@ class LineofSight():
         self.y_closest_ = y_list[self.min_index]
 
         return self.x_closest_ , self.y_closest_
+    
+    def closest_point_minimizer(self,eta,coefficient):
+        x_v=eta[0] # current vehicle position x
+        y_v=eta[1] # current vehicle position y
+        coefficient.sort()
 
+        a,b,c,d=coefficient
 
-   
+       
+        def f(x):
+            return a*x**3 + b*x**2 + c*x + d
+ 
+        P = (x_v, y_v)
+
+        def objective(X):
+            x, y = X
+            return np.sqrt((x - P[0]) ** 2 + (y - P[1]) ** 2)
+
+        def c1(X):
+            x, y = X
+            return f(x)-y
+
+        c1={'type':'eq','fun':c1}
+
+        X = minimize(objective, x0 = [x_v, y_v],method='SLSQP',constraints= c1)
+
+        self.x_closest = X.x[0]  # closest point on curve -x
+        self.y_closest = X.x[1]  # closest point on curve -y 
+        print('Cloest X: ',self.x_closest,'Closest y: ',self.y_closest)
+
+    def closest_point_sym(self,eta):
+        x_v = eta[0]
+        y_v = eta[1]
+        coef_ = self.coeff[self.k][:]
+        x = sm.Symbol('x')
+        deriv = sm.diff(2*(x_v-x)+2*(y_v-coef_[0]*x**3+coef_[1]*x**2+coef_[2]*x+coef_))
+        x_candidate = sm.solve(deriv,x)
+
 
     def execute(self,nu,eta,Wpx,Wpy): 
 
@@ -128,29 +164,32 @@ class LineofSight():
             self.init_x_curve = list(chain.from_iterable(self.Wp_x_init[self.k:self.k+2]))
             self.init_y_curve = list(chain.from_iterable(self.Wp_y_init[self.k:self.k+2]))
 
-       #### Analitic Derivative #####
        
         c=self.coeff[self.k].tolist()
 
-        ### Closest Point Method 
+        ##############################
+        ### Closest Points Methods ### 
+        ##############################
+
         #1# 
-        # self.closest_point_minimizer(eta,c)
+        self.closest_point_minimizer(eta,c)
         #2#
-        self.x_closest, self.y_closest = self.closest_point(eta,self.init_x_curve,self.init_y_curve)
+        # self.x_closest, self.y_closest = self.closest_point(eta,self.init_x_curve,self.init_y_curve)
+        #3#
+        #self.closest_point_sym(eta)
 
         if self.init_y_curve[self.min_index]==self.init_y_curve[-1]:
-            curve_slope_angle = self.curve_slope_angle_next
+            curve_slope_angle=self.curve_slope_angle_next
         else:
-            curve_slope_angle = math.atan2(self.init_y_curve[self.min_index+1]-self.init_y_curve[self.min_index],self.init_x_curve[self.min_index+1]-self.init_x_curve[self.min_index]) 
+            curve_slope_angle=math.atan2(self.init_y_curve[self.min_index+1]-self.init_y_curve[self.min_index],self.init_x_curve[self.min_index+1]-self.init_x_curve[self.min_index]) 
         
         self.curve_slope_angle_next=curve_slope_angle
         #cross-track error
         y_e=-(x_v-self.x_closest )*math.sin(curve_slope_angle)+(y_v- self.y_closest)*math.cos(curve_slope_angle) 
   
         # self.var_lookhead_distance=(self.delta_max-self.delta_min)*math.exp(-self.delta_k*y_e**2)+self.delta_min
-        path_curv_radius = self.R_calculator.R_cal(eta)
+        path_curv_radius=self.R_calculator.R_cal(eta)
         self.var_lookhead_distance = (abs(y_e)*self.delta_k)+self.delta_min#-path_curv_radius/100
-        
 
       ####################################################################
 
@@ -197,6 +236,8 @@ class LineofSight():
                 self.y_los = self.y_init[exact_index_location+self.min_index+wk]
 
             else:
+       
+            
                 print('X İNİT[[-1]',self.x_init[-1],'Y İNİT[[-1]',self.y_init[-1])
                 self.x_los = self.x_init[-1]
                 self.y_los = self.y_init[-1]
@@ -207,28 +248,29 @@ class LineofSight():
 
 
         # ########################## NORMAL LOS POINT  ##################################################
-        # self.x_los =  self.x_closest+ self.var_lookhead_distance*math.cos(curve_slope_angle)          #
-        # self.y_los =  self.y_closest + self.var_lookhead_distance*math.sin(curve_slope_angle)         #
-        # ###############################################################################################
+        # self.x_los =  self.x_closest+ self.var_lookhead_distance*math.cos(curve_slope_angle)
+        # self.y_los =  self.y_closest + self.var_lookhead_distance*math.sin(curve_slope_angle)
+        # ##############################################################################################
 
         d = np.sqrt((self.x_closest -self.x_los)**2+(self.y_closest-self.y_los)**2)
 
-
+        print('actual lookhead',d)
         self.chi_r=math.atan(-y_e/abs(d)) # los angle 
 
         Beta = math.atan2(y_velocity,x_velocity)
         self.chi_d=curve_slope_angle+self.chi_r-Beta # ref açı
+        print('CURVE SLOPE ANGLE',math.degrees(curve_slope_angle))
+        print('CHİ R',math.degrees(self.chi_r))
 
-
-        # self.chi_d= math.atan2((self.y_los-y_v),(self.x_los-x_v))
+        self.chi_d= math.atan2((self.y_los-y_v),(self.x_los-x_v))
         error_angle=self.chi_d-eta[5] # açı hatası
 
         # referans hız değeri
         term1=abs(y_e)/self.y_max
-
+        print('TERM!',term1)
         # print('term1',term1)
         term2=abs(error_angle)/self.chi_max
-   
+        print('TERM2',term2)
         U_desired = max(self.U_max*(1-term1-term2),self.U_min)
         
         
@@ -282,41 +324,13 @@ class LineofSight():
 
         plt.pause(0.0001)
 
-    def animate(self,x_list,y_list,heading_list,Wpx,Wpy,x_closest_list,y_closest_list,x_los_list,y_los_list,u_control,i):
-
-
-
-   
-        # plt.cla()
-        plt.xlim([0,40])
-        plt.ylim([0,40])
-        plt.plot(Wpx,Wpy,'ro',label='Waypoints')
-
-        # plt.gcf().gca().add_artist(plt.Circle((x_obs,y_obs),2,fill=False))
-
-        plt.plot(self.x_init,self.y_init,'m--')
-
-        plt.plot(self.x_pose, self.y_pose,"r--")
-
-        # plt.title([u_control[1],u_control[0],self.var_lookhead_distance,current_eta])
+    def animate(self,current_eta,Wpx,Wpy,u_control,i):
         
-        plt.plot(x_list[i],y_list[i],'bo',label='vahicle position')
-        # plt.title(u_control[i])
-        # plt.plot(OS_Arr[0],OS_Arr[1],'b-.')
+        anim=FuncAnimation(plt.clf(),self.los_simulation(current_eta,Wpx,Wpy,u_control),interval=1000,blit=True)
+    
+        plt.show()
 
-        # plt.plot(TS_Arr[0],TS_Arr[1],'c-.')
-
-        plt.plot(x_closest_list[i],y_closest_list[i],'co')
-        
-        # plt.plot([x_list[i],x_closest_list][i],[x_list[i],y_closest_list[i]],'g--',label='cross track error ')
-
-        plt.plot([x_closest_list[i],x_los_list[i]],[y_closest_list[i],y_los_list[i]],'m--',label='Varing Delta')
-
-        plt.plot(x_los_list[i],y_los_list[i],'ko')
-
-        plt.plot([x_list[i],x_list[i]+5*math.cos(heading_list[i])],[y_list[i],y_list[i]+5*math.sin(heading_list[i])])
-
-        
+        return anim
 
 
 
