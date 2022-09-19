@@ -1,0 +1,3 @@
+"MPC-based COLREGS Compliant Collision Avoidance for a Multi-Vessel Ship-Towing System" (R.R Negenborn)  
+-------------------------------------------------------------------------------------------------------
+Collision avoidance of a physically interconnected multi-vessel system. 
