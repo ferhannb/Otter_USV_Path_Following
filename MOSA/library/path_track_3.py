@@ -76,7 +76,8 @@ class LineofSightfirst():
         self.y_closest_ = y_list[self.min_index]
 
         return self.x_closest_ , self.y_closest_
-    
+
+
     def closest_point_minimizer(self,eta,coefficient):
         x_v=eta[0] # current vehicle position x
         y_v=eta[1] # current vehicle position y
@@ -84,7 +85,6 @@ class LineofSightfirst():
 
         a,b,c,d=coefficient
 
-       
         def f(x):
             return a*x**3 + b*x**2 + c*x + d
  
@@ -96,23 +96,29 @@ class LineofSightfirst():
 
         def c1(X):
             x, y = X
-            return f(x)-y
+            return y-f(x)
 
         c1={'type':'eq','fun':c1}
 
         X = minimize(objective, x0 = [x_v, y_v],method='SLSQP',constraints= c1)
-
+      
         self.x_closest = X.x[0]  # closest point on curve -x
         self.y_closest = X.x[1]  # closest point on curve -y 
+
+        print('X values:',X)
         print('Cloest X: ',self.x_closest,'Closest y: ',self.y_closest)
 
+
     def closest_point_sym(self,eta):
+
         x_v = eta[0]
         y_v = eta[1]
         coef_ = self.coeff[self.k][:]
         x = sm.Symbol('x')
-        deriv = sm.diff(2*(x_v-x)+2*(y_v-coef_[0]*x**3+coef_[1]*x**2+coef_[2]*x+coef_))
+        deriv = sm.diff(2*(x_v-x)+2*(y_v-coef_[0]*x**3+coef_[1]*x**2+coef_[2]*x+coef_[3]))
         x_candidate = sm.solve(deriv,x)
+
+        return x_candidate
 
 
     def execute(self,nu,eta,Wpx,Wpy): 
@@ -141,26 +147,12 @@ class LineofSightfirst():
                     if self.k>=len(Wpx):
                         pass
 
-        # if dist<5:
-        #     print('****___------*******')
-        #     if dist<=self.n:  # Waypoint geçişleri için
-        #         self.n+=1
-
-        #         if self.n>=len(Wpx):
-        #             pass       
-
-
-        # if (self.n) >= (len(self.Wp_x_init)-1):
-        #     self.m = (len(self.Wp_x_init)-1)
-        #     self.init_x_curve = self.Wp_x_init[self.k]
-        #     self.init_y_curve = self.Wp_y_init[self.k]
-
         if self.k==len(Wpx):
 
             self.init_x_curve = self.Wp_x_init[self.k]
             self.init_y_curve = self.Wp_y_init[self.k]
         else:
-            print('********************')
+
             self.init_x_curve = list(chain.from_iterable(self.Wp_x_init[self.k:self.k+2]))
             self.init_y_curve = list(chain.from_iterable(self.Wp_y_init[self.k:self.k+2]))
 
@@ -205,11 +197,9 @@ class LineofSightfirst():
         else:
             for m in range(self.k):
                 index_len += len(self.Wp_x_init[m])
-                
-                
+                          
             exact_index_location =exact_index_location+index_len
-                        
-        
+                         
         while  curve_len<=self.var_lookhead_distance:
 
             if wk == 0:
@@ -237,8 +227,7 @@ class LineofSightfirst():
 
             else:
        
-            
-                print('X İNİT[[-1]',self.x_init[-1],'Y İNİT[[-1]',self.y_init[-1])
+                print('X INIT[[-1]',self.x_init[-1],'Y INIT[[-1]',self.y_init[-1])
                 self.x_los = self.x_init[-1]
                 self.y_los = self.y_init[-1]
                 print('BREAK')
@@ -247,11 +236,10 @@ class LineofSightfirst():
                 
 
 
-        # ########################## NORMAL LOS POINT  ##################################################
-        # self.x_los =  self.x_closest+ self.var_lookhead_distance*math.cos(curve_slope_angle)
-        # self.y_los =  self.y_closest + self.var_lookhead_distance*math.sin(curve_slope_angle)
-        # ##############################################################################################
-
+        # ########################## NORMAL LOS POINT  ######################################## #
+        # self.x_los =  self.x_closest+ self.var_lookhead_distance*math.cos(curve_slope_angle)  #
+        # self.y_los =  self.y_closest + self.var_lookhead_distance*math.sin(curve_slope_angle) #
+        # ##################################################################################### #
         d = np.sqrt((self.x_closest -self.x_los)**2+(self.y_closest-self.y_los)**2)
 
         print('actual lookhead',d)
@@ -331,11 +319,6 @@ class LineofSightfirst():
         plt.show()
 
         return anim
-
-
-
-
-
 
 
 # if __name__=='__main__':

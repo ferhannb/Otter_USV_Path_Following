@@ -393,7 +393,7 @@ def start(steptime):
     nu = np.array([0, 0, 0, 0, 0, 0], float)
     u_actual = np.array([0, 0], float)
     u_control = np.array([0, 0], float)           
-    current_eta = np.array([10, 10, 0, 0, 0, math.radians(75)], float)
+    current_eta = np.array([15, 15, 0, 0, 0, math.radians(75)], float)
     heading=current_eta[5]*180/math.pi %360
     speed = math.sqrt(nu[0]**2+nu[1]**2)
     sampleTime=steptime
@@ -650,7 +650,7 @@ if __name__ == "__main__":
 
     los2 = LineofSight()
     los  = LineofSightfirst()
-    index = True
+    index = False
     if index==True:
         print('LOS 2 Method' )
         method=los2
@@ -752,7 +752,7 @@ if __name__ == "__main__":
         
         radius=R_cal.R_cal(current_eta)
 
-        # method.los_simulation(current_eta,Wpx,Wpy,u_control)
+        method.los_simulation(current_eta,Wpx,Wpy,u_control)
 
 
         if method.x_los==method.x_closest and method.y_los == method.y_closest:

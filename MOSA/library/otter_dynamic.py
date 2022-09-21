@@ -2,7 +2,6 @@ import numpy as np
 import math
 import time
 
-from sympy import E
 
 #from OtterSimulator.control import PIDpolePlacement
 #from OtterSimulator.gnc import Smtrx, Hmtrx, m2c, crossFlowDrag, sat, attitudeEuler
