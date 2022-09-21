@@ -43,7 +43,7 @@ Author:     Thor I. Fossen
 """
 
 
-from ctypes import create_unicode_buffer
+
 import numpy as np
 import math
 import time
@@ -569,16 +569,17 @@ def speed_control(set_point):
     # Feedforward 
     U_f = (3.684*set_point**3-23.44*set_point**2+67.35*set_point+12.3)
     ## Proportion 
-    U_p = 20*error  # 3 default nolmal0 =3  nolmal1=
-    """Propetionu 12 yaptığımda control sinyali çıktısı değerinde aşım oluşmakta fakat hızlı bir oturma gerçekleşmektedir."""
+    U_p = 25*error  # 3 default nolmal0 =3  nolmal1=
+    """p 12-20 yaptığımda control sinyali çıktısı değerinde aşım oluşmakta fakat hızlı bir oturma gerçekleşmektedir."""
     print('U_proportion',U_p)
     ## derivative 
     # U_d = 5*(error-pre_error_speed)   # 1 default 
     U_d = 0 * math.sqrt((prev_x-current_eta[0])**2+(prev_y-current_eta[1])**2) ## Konum farkları alınarak türev oluşturulur  
                                                                                ## Derivative kick etkisini en aza indirmek için.
     ## integral 
-    U_i = 100* (error+pre_error_speed)*dt/2  # 0.25 default nolmal0 =0.3  nolmal1=
+    U_i = 125* (error+pre_error_speed)*dt/2  # 0.25 default nolmal0 =0.3  nolmal1=
     """İntegrator değerini 1000 yaptığımızda kontrolcü sinyalınde aşım olmakta aynı zamanda hızlı bir şekilde ref. hıza oturmaktadır."""
+
     if normal ==1:
 
         if U_i<saturation_limit_speed_max:
@@ -650,17 +651,19 @@ def rampfunction(filtre_signal,u_control,prev_u_control,pp_u_control,inc_rate=1.
 def filtred_referans(pre_speed_ref,speed_ref,filtred_signal,delta_rate=0.03):
 
     if pre_speed_ref == filtred_signal:
-        print('1')
+
         pre_speed_ref = filtred_signal
     else:
         if filtred_signal<speed_ref:
-            print('2')
+
             filtred_signal = filtred_signal+delta_rate
+            if (abs(filtred_signal-pre_speed_ref))/(abs(speed_ref-pre_speed_ref))>0.6:
+                filtred_signal = filtred_signal+0.009
             if filtred_signal>speed_ref:
-                print('3')
+      
                 filtred_signal=speed_ref
         elif filtred_signal>speed_ref:
-            print('444444444444444444444444444444444444444')
+
             filtred_signal = filtred_signal - delta_rate
             
             if filtred_signal<speed_ref:
@@ -673,9 +676,8 @@ def filtred_referans(pre_speed_ref,speed_ref,filtred_signal,delta_rate=0.03):
 
     return filtred_signal
 
-def filtred_heading_referans(pre_speed_ref,speed_ref,filtred_signal):
+def filtred_heading_referans(speed_ref,filtred_signal):
 
-    
 
     if speed_ref-filtred_signal<0:
         if (speed_ref-filtred_signal)%360<(filtred_signal-speed_ref):
@@ -768,31 +770,31 @@ if __name__ == "__main__":
     for i in range(3000):
 
         Time+=0.02
-        # if i<500:
-        #     U_desired=1
-        # elif 500<=i<1000:
-        #     U_desired=1.8
-        # elif 1000<=i<1500:  
-        #     U_desired = 3
-        # elif 1500<=i<2000:
-        #     U_desired = 1.25
-        # elif 2000<=i<2500:
-        #     U_desired = 2
-        # else:
-        #     U_desired = 0
-
-        if i<5:
-            heading_ref=50
-        elif 5<=i<1000:
-            heading_ref=100
+        if i<500:
+            U_desired=1
+        elif 500<=i<1000:
+            U_desired=1.8
         elif 1000<=i<1500:  
-            heading_ref = 20
+            U_desired = 3
         elif 1500<=i<2000:
-            heading_ref = 60
+            U_desired = 1.25
         elif 2000<=i<2500:
-            heading_ref = 10
+            U_desired = 2
         else:
-            heading_ref =30
+            U_desired = 0.1
+
+        # if i<5:
+        #     heading_ref=50
+        # elif 5<=i<1000:
+        #     heading_ref=100
+        # elif 1000<=i<1500:  
+        #     heading_ref = 20
+        # elif 1500<=i<2000:
+        #     heading_ref = 60
+        # elif 2000<=i<2500:
+        #     heading_ref = 10
+        # else:
+        #     heading_ref =30
         
         # else:
         #     U_desired=30*math.sin(0.005*i)
@@ -801,13 +803,13 @@ if __name__ == "__main__":
         
         
 
-        U_desired = 0
-        # heading_ref = 50
+        # U_desired = 0
+        heading_ref = 50
         
         filtred_signal= filtred_referans(prev_speed_ref,U_desired,filtred_signal)
-        heading_filtred_signal= filtred_heading_referans(prev_heading_ref,heading_ref,heading_filtred_signal)
+        heading_filtred_signal= filtred_heading_referans(heading_ref,heading_filtred_signal)
         prev_speed_ref = U_desired
-        prev_heading_ref = heading_ref
+         
         prev_x = current_eta[0]
         prev_y = current_eta[1]
         prev_heading = current_eta[-1]
@@ -815,52 +817,10 @@ if __name__ == "__main__":
         pre_speed.append(pre_speed_ref)
         u_avg,error_speed  = speed_control(filtred_signal)  # linear speed control
         heading_signal,error_heading = heading_control(heading_filtred_signal)
-        u_control = control_allocation(75,heading_signal)
+        u_control = control_allocation(u_avg,0)
 
 
-        ### RAMPA SINYALI-KONTROL SINYALI ARTISI-RATE LIMITI ICIN  
-
-        # if prev_u_control[1]==u_control[1]:
-        #     prev_u_control[1] = u_control[1]
-        # else:    
-        #     if iramp_signal<u_control[1]:
-        #         iramp_signal=iramp_signal+1.25
-        #         if iramp_signal>u_control[1]:
-        #             iramp_signal=u_control[1]
-
-        #     elif iramp_signal>u_control[1]:
-                
-        #         iramp_signal=iramp_signal-1.25
-        #         if iramp_signal<u_control[1]:
-        #             iramp_signal=u_control[1]
-        #     else:
-        #         iramp_signali=u_control[1]
-
-        # if prev_u_control[0]==u_control[0]:
-        #     prev_u_control[0] = u_control[0]
-        # else:    
-        #     if sramp_signal<u_control[0]:
-                
-        #         sramp_signal=sramp_signal+1.25
-        #         if sramp_signal>u_control[0]:
-        #             sramp_signal=u_control[0]
-
-        #     elif sramp_signal>u_control[0]:
-                
-        #         sramp_signal=sramp_signal-1.25
-        #         if sramp_signal<u_control[0]:
-        #             sramp_signal=u_control[0]
-        #     else:
-        #         sramp_signals=u_control[0]
-        # #####
-
-        #u_control=[sramp_signal,iramp_signal] # [sancak rpm,iskele rpm]
-        # u_control =[104,-104]
-        # Ipp_u_control,Iramp_signal,prevI=rampfunction(Iramp_signal,u_control[0],prev_u_control[0],Ipp_u_control)
-        # Ipp_u_control2=Ipp_u_control
-        # Spp_u_control,Sramp_signal,prevS=rampfunction(Sramp_signal,u_control[1],prev_u_control[1],Spp_u_control)
-        # Spp_u_control2=Spp_u_control
-        # u_control=[Iramp_signal,Sramp_signal]
+        u_control = [104,104 ]
         output=function(u_control) # runnig dynamic model of usv (otter)
         # prev_u_control=u_control
         
