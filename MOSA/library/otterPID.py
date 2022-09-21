@@ -468,7 +468,6 @@ def heading_control(setpoint):
     #     error=0
     print('error:',error)
     
-    print('heading',feed_back)
     while error<-180:
         error = error +360
     while error > 180:
@@ -478,7 +477,7 @@ def heading_control(setpoint):
     dt  = 0.02 
     ## PID  
     ## Proportion
-    Up = -5.5*error
+    Up = -7*error
 
     ## Derivative
     # Ud = 10*(error-pre_error_heading)
@@ -486,7 +485,7 @@ def heading_control(setpoint):
     
 
     ## Integral 
-    ki=100
+    ki=125
     Ui =  ki* (error+pre_error_speed)*dt
 
     if Ui<saturation_limit_speed_max:
@@ -581,6 +580,7 @@ def filtred_referans(pre_speed_ref,speed_ref,filtred_signal,delta_rate=0.03):
                 print('3')
                 filtred_signal=speed_ref
         elif filtred_signal>speed_ref:
+            print('444444444444444444444444444444444444444')
             filtred_signal = filtred_signal - delta_rate
             
             if filtred_signal<speed_ref:
@@ -588,24 +588,42 @@ def filtred_referans(pre_speed_ref,speed_ref,filtred_signal,delta_rate=0.03):
 
         else:
             filtred_signal=speed_ref
+
+    
+
     return filtred_signal
 
 def filtred_heading_referans(pre_speed_ref,speed_ref,filtred_signal):
 
-    if pre_speed_ref== filtred_signal:
-        pre_speed_ref = filtred_signal
+    if speed_ref-filtred_signal<0:
+        if (speed_ref-filtred_signal)%360<(filtred_signal-speed_ref):
 
-    elif speed_ref-filtred_signal<(filtred_signal-speed_ref):
-        filtred_signal = filtred_signal+0.36
-        if filtred_signal>speed_ref:
-            print('3')
-            filtred_signal=speed_ref
-    elif  speed_ref-filtred_signal>(filtred_signal-speed_ref):
-        filtred_signal = filtred_signal - 0.36
-        if filtred_signal<speed_ref:
-                filtred_signal=speed_ref
-    else:
-        filtred_signal=speed_ref
+            filtred_signal = filtred_signal+0.36
+            if filtred_signal>0:
+
+                if (-filtred_signal)%360>speed_ref:
+                    filtred_signal=speed_ref
+        elif  (speed_ref-filtred_signal)%360>(filtred_signal-speed_ref):
+
+            filtred_signal = filtred_signal - 0.36
+            if filtred_signal<0:
+                if (filtred_signal%360)>speed_ref:
+                    filtred_signal=speed_ref
+    elif speed_ref-filtred_signal>0:
+        if (speed_ref-filtred_signal)<(filtred_signal-speed_ref)%360:
+            filtred_signal = filtred_signal+0.36
+            if (filtred_signal)>0:
+                if filtred_signal>speed_ref:
+                    filtred_signal=speed_ref
+        elif  (speed_ref-filtred_signal)>(filtred_signal-speed_ref)%360:
+
+            filtred_signal = filtred_signal - 0.36
+            if filtred_signal<0:
+
+                if (filtred_signal%360)<speed_ref:
+                        filtred_signal=speed_ref
+        
+        
     return filtred_signal
 
 
@@ -616,10 +634,10 @@ if __name__ == "__main__":
     start(0.02)
     # Wpx = [10,20,30,40]
     # Wpy = [10,20,10,20]
-    # Wpx = [10,20,30,20]
-    # Wpy = [10,20,30,40]
-    Wpx = [10,30,50,70]
-    Wpy = [10,20,10,40]
+    Wpx = [10,20,30,20]
+    Wpy = [10,20,30,40]
+    # Wpx = [10,30,50,70]
+    # Wpy = [10,20,10,40]
     ### non-index method
     # Wpx = [10,20,30,40]
     # Wpy = [10,10,10,10] 

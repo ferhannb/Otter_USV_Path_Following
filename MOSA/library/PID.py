@@ -467,11 +467,11 @@ def heading_control(setpoint):
     dt  = 0.02 
     ## PID  
     ## Proportion
-    Up = -6*error
+    Up = -7*error # 6
 
     ## Derivative
     # Ud = 10*(error-pre_error_heading)
-    Ud = 20*(current_eta[-1]-prev_heading) # Aracın açısal konum farkından deribvative etkisi sisteme eklenir. Derivative kick etkisini azaltmak için.
+    Ud = 0*(current_eta[-1]-prev_heading) # Aracın açısal konum farkından deribvative etkisi sisteme eklenir. Derivative kick etkisini azaltmak için.
     
 
     ## Integral 
@@ -784,15 +784,15 @@ if __name__ == "__main__":
         if i<5:
             heading_ref=50
         elif 5<=i<1000:
-            heading_ref=50
+            heading_ref=100
         elif 1000<=i<1500:  
-            heading_ref = 320
+            heading_ref = 20
         elif 1500<=i<2000:
-            heading_ref = 320
+            heading_ref = 60
         elif 2000<=i<2500:
-            heading_ref = 100
+            heading_ref = 10
         else:
-            heading_ref =100
+            heading_ref =30
         
         # else:
         #     U_desired=30*math.sin(0.005*i)
@@ -815,7 +815,7 @@ if __name__ == "__main__":
         pre_speed.append(pre_speed_ref)
         u_avg,error_speed  = speed_control(filtred_signal)  # linear speed control
         heading_signal,error_heading = heading_control(heading_filtred_signal)
-        u_control = control_allocation(60,heading_signal)
+        u_control = control_allocation(75,heading_signal)
 
 
         ### RAMPA SINYALI-KONTROL SINYALI ARTISI-RATE LIMITI ICIN  

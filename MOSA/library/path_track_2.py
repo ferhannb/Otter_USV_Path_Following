@@ -217,10 +217,11 @@ class LineofSight():
         self.chi_r=math.atan(-y_e/abs(d)) # los angle 
 
         Beta = math.atan2(y_velocity,x_velocity)
+
+        ### 2 ch_d secenegi
         self.chi_d=curve_slope_angle+self.chi_r-Beta # ref açı
-
-
         # self.chi_d= math.atan2((self.y_los-y_v),(self.x_los-x_v))
+
         error_angle=self.chi_d-eta[5] # açı hatası
 
         # referans hız değeri
