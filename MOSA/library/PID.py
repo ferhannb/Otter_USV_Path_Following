@@ -1,905 +1,302 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
+'''
+    :project:   PID Control Library for Dynamic Systems
+    :author:    email:manyetar@gmail.com
+                github:saltin0
 
+    :reference: Fossen T, Handbook of Marinecraft Systems and Motion Control
+                Ogata K, Classical Control Theory
+                Nisse N, Modern Control
+'''
+from math import sqrt
 
-## Otter PID kontrol tasarımı
-"""
-otter.py: 
-    Class for the Maritime Robotics Otter USV, www.maritimerobotics.com. 
-    The length of the USV is L = 2.0 m. The constructors are:
+class PID():
+    def __init__(self,Kp,Ki,Kd,Kp1=None,
+                derivative_feedback=False,derivative_filter_coeff=None,
+                inner_loop_p = False,
+                saturation_limit=None,
+                wind_feed_forward = False,
+                Kf = None,
+                acceleration_gain = None,
+                wave_current_balancer = False):
+        '''
+            Initiate the PID controller structure parameters
 
-    otter()                                          
-        Step inputs for propeller revolutions n1 and n2
-    otter('headingAutopilot',psi_d,V_current,beta_current,tau_X)  
-       Heading autopilot with options:
-          psi_d: desired yaw angle (deg)
-          V_current: current speed (m/s)
-          beta_c: current direction (deg)
-          tau_X: surge force, pilot input (N)
+            :params:    Kp-Proportional gain
+            :params:    Ki-Integral gain
+            :params:    Kd-Derivative gain
+            :params:    derivative_feedback-Set the derivative gain in measurement way
+                        PI-D Controller
+            :params:    saturation_limit-Set the maximum value of controller corresponding actuator
+            :params:    derivative_filter_coefficient-To set the system as causal system
+            :params:    inner_loop_p-Change the system controller into the PIP controller. It is generally used
+                        for first order systems.
+            :params:    wind_feed_forward-Add the estimated wind disturbance to the controller. Estimation
+                        must be done outside of the controller.
+            :params:    Kf-Set the feedforward gain. Multiply the reference value and add it to the controller.
+            :params:    acceleration_gain-To reduce the disturbance effect set the acceleration gain.
+            :params:    wave_current_balance-To reduce the wave effect on the system set the variable as True with 
+                        identified wave and RAO models.
+            --------------------------------------------------------------------------------------------------------
+            :variable:  system_output_pre-Keep the previous response of the system to take derivative
+            :variable:  ref_pre- Keep the previous reference value (for derivative)
+            :variable:  deriv_out_pre-Keep the previous derivative output of PID controller to reduce the derivative
+                        gain with filter.
+            :variable:  ref_now-Reference value holder.
+            :variable:  err_cum-Cumulative error of the integral part of the PID.
+            :variable:  clamp-Reset the integral at the boundaries via clamping method. Stop integrating 
+                        at boundaries.
+            :variable:  err_now-Ref_now - system_output_now
+            :variable:  u-Keep the control signal in memory.
+        '''
+        # Parameters
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.Kp1 = Kp1
+        self.derivative_feedback = derivative_feedback
+        self.derivative_filter_coefficient = derivative_filter_coeff
+        self.saturation_limit = saturation_limit
+        self.Ag  = acceleration_gain 
+        self.wind_ff = wind_feed_forward
+        self.Kf = Kf
+        self.inner_loop_p = inner_loop_p
+        self.wave_current_balancer = wave_current_balancer
+        # Variables
+        self.system_output_pre = 0.0
+        self.deriv_out_pre = 0.0
+        self.ref_pre = 0.0
+        self.ref_now = 0.0
+        self.err_cum = 0.0
+        self.clamp = False
+        self.err_now = 0.0
+        self.u = 0.0
+        self.deriv_filter_integral_cum = 0.0
+
+    def execute(self,system_output,dt,acceleration=0.0,nonlinear_terms=None):
+        '''
+            :function:  execute-Calculate the output of formed structure which obtains
+                        feedforward-PID-extra P-nonlinear elimination-wind feed forward-
+                        acceleration feedback - current compansator.
+            
+            :params:    system_output-Output of the plant model. Measured data.
+            :params:    dt-Sample time.
+            :params:    acceleration-Acceleration measurement. Data type is float.
+            :params:    nonlinear_terms-Add nonlinearities of the system to eliminate.
+
+            :return:    u-Output of the entire controller.
+        '''
+        self.system_output = system_output
+        # Calculate error definitions 
+        err_now = self.ref_now - system_output
+        err_pre = self.ref_pre - self.system_output_pre
+
+        ### Calculate parallel PID output ###
+        proportion_part = self.propotional(err_now)
+        integral_part = self.integrate(err_pre,err_now,dt)
+
+        # Form the PI-D or PID blocks
+        if self.derivative_feedback == True:
+            derivative_part = self.derivate(self.system_output_pre,system_output,dt)
+        if self.derivative_feedback == False:
+            derivative_part = -1*float(self.derivate(err_pre,err_now,dt))
+        # Sum the parallel structure
+        u = float(integral_part + proportion_part + derivative_part)
+
+        # If the system is controlled by PI-P1 structure then following code will be running
+        if self.inner_loop_p:
+            # Inner loop difference defines the difference between system output and
+            #       PID controller output.
+            inner_loop_diff = u - system_output
+            u = self.in_proportional(inner_loop_diff)
         
-Methods:
-    
-[nu,u_actual] = dynamics(eta,nu,u_actual,u_control,sampleTime) returns 
-    nu[k+1] and u_actual[k+1] using Euler's method. The control inputs are:
+        # Acceleration feedback mechanism added 
+        #   this property will reduces the disturbance effect.
+        if self.Ag and acceleration is not None:
+            try:
+                u = u - self.Ag*float(acceleration)
+            except:
+                pass
+        # Add feedforward to control action
+        if self.Kf is not None:
+            u_kf =self.Kf*self.ref_now
+            u = u+u_kf
+        # Eliminate the nonlinearities of the system 
+        if nonlinear_terms is not None:
+            try:
+                u = u - float(nonlinear_terms)
+            except:
+                pass
 
-    u_control = [ n1 n2 ]' where 
-      n1: propeller shaft speed, left (rad/s)
-      n2: propeller shaft speed, right (rad/s)
-
-u = headingAutopilot(eta,nu,sampleTime) 
-    PID controller for automatic heading control based on pole placement.
-
-u = stepInput(t) generates propeller step inputs.
-
-[n1, n2] = controlAllocation(tau_X, tau_N)     
-    Control allocation algorithm.
-    
-References: 
-  T. I. Fossen (2021). Handbook of Marine Craft Hydrodynamics and Motion 
-     Control. 2nd. Edition, Wiley. 
-     URL: www.fossen.biz/wiley            
-
-Author:     Thor I. Fossen
-"""
-
-
-
-import numpy as np
-import math
-import time
-
-#from OtterSimulator.control import PIDpolePlacement
-#from OtterSimulator.gnc import Smtrx, Hmtrx, m2c, crossFlowDrag, sat, attitudeEuler
-from gnc import Smtrx, Hmtrx, m2c, crossFlowDrag, sat, attitudeEuler
-from otterradius import speed_generate
-import time
-
-# Class Vehicle
-class Otter:
-    """
-    otter()                          Step inputs for n1 and n2
-    otter('headingAutopilot',psi_d)  Heading autopilot, desired yaw angle (deg)
-    """
-
-    def __init__(self, 
-                controlSystem="stepInput", 
-                r = 0, 
-                V_current = 0, 
-                beta_current = 0, 
-                tau_X = 120):
-
-        if controlSystem == "headingAutopilot":
-            self.controlDescription = (
-                "Heading autopilot, psi_d = "
-                + str(r)
-                + " deg"
-                )
-        else:
-            self.controlDescription = "Step inputs for n1 and n2"
-            controlSystem = "stepInput"
-        self.C = np.zeros((6,6))
-        self.ref = r
-        self.V_c = V_current
-        self.beta_c = beta_current
-        self.controlMode = controlSystem
-        self.tauX = tau_X  # surge force (N)
-
-        # Initialize the Otter USV model
-        self.T_n = 0.32  # propeller time constants (s)
-        self.L = 2.0    # Length (m)
-        self.B = 1.08   # beam (m)
-        self.nu = np.array([0, 0, 0, 0, 0, 0], float)  # velocity vector
-        self.u_actual = np.array([0, 0], float)  # propeller revolution states
-        self.name = "Otter USV (see 'otter.py' for more details)"
-
-        self.controls = [
-            "Left propeller shaft speed (rad/s)",
-            "Right propeller shaft speed (rad/s)",
-        ]
-        self.dimU = len(self.controls)
-
-        # Constants
-        g = 9.81    # acceleration of gravity (m/s^2)
-        rho = 1025  # density of water
-
-        m = 55.0    # mass (kg)
-        mp = 25.0   # Payload (kg)
-        self.m_total = m + mp
-        rp = np.array([0, 0, 0], float)     # location of payload (m)
-        rg = np.array([0.2, 0, -0.2], float)    # CG for hull only (m)
-        rg = (m * rg + mp * rp) / (m + mp)      # CG corrected for payload
-        self.S_rg = Smtrx(rg)
-        self.H_rg = Hmtrx(rg)
-        self.S_rp = Smtrx(rp)
-
-        R44 = 0.4 * self.B  # radii of gyration (m)
-        R55 = 0.25 * self.L
-        R66 = 0.25 * self.L
-        T_yaw = 1.0         # time constant in yaw (s)
-        Umax = 6 * 0.5144   # max forward speed (m/s)
-
-        # Data for one pontoon
-        self.B_pont = 0.25  # beam of one pontoon (m)
-        y_pont = 0.395      # distance from centerline to waterline centroid (m)
-        Cw_pont = 0.75      # waterline area coefficient (-)
-        Cb_pont = 0.4       # block coefficient, computed from m = 55 kg
-
-        # Inertia dyadic, volume displacement and draft
-        nabla = (m + mp) / rho  # volume
-        self.T = nabla / (2 * Cb_pont * self.B_pont * self.L)  # draft
-        Ig_CG = m * np.diag(np.array([R44 ** 2, R55 ** 2, R66 ** 2]))
-        self.Ig = Ig_CG - m * self.S_rg @ self.S_rg - mp * self.S_rp @ self.S_rp
-
-        # Experimental propeller data including lever arms
-        self.l1 = -y_pont  # lever arm, left propeller (m)
-        self.l2 = y_pont  # lever arm, right propeller (m)
-        self.k_pos = 0.02216 / 2  # Positive Bollard, one propeller
-        self.k_neg = 0.01289 / 2  # Negative Bollard, one propeller
-        self.n_max = math.sqrt((0.5 * 24.4 * g) / self.k_pos)  # max. prop. rev.
-        self.n_min = -math.sqrt((0.5 * 13.6 * g) / self.k_neg) # min. prop. rev.
-
-        # MRB_CG = [ (m+mp) * I3  O3      (Fossen 2021, Chapter 3)
-        #               O3       Ig ]
-        MRB_CG = np.zeros((6, 6))
-        MRB_CG[0:3, 0:3] = (m + mp) * np.identity(3)
-        MRB_CG[3:6, 3:6] = self.Ig
-        MRB = self.H_rg.T @ MRB_CG @ self.H_rg
-
-        # Hydrodynamic added mass (best practice)
-        Xudot = -0.1 * m
-        Yvdot = -1.5 * m
-        Zwdot = -1.0 * m
-        Kpdot = -0.2 * self.Ig[0, 0]
-        Mqdot = -0.8 * self.Ig[1, 1]
-        Nrdot = -1.7 * self.Ig[2, 2]
-
-        self.MA = -np.diag([Xudot, Yvdot, Zwdot, Kpdot, Mqdot, Nrdot])
-
-        # System mass matrix
-        self.M = MRB + self.MA
+        # Anti-windup for integral part 
+        #   Anti-windup method : clamping
+        u_sat = self.reset_integral(u)
         
-        self.Minv = np.linalg.inv(self.M)
+        if u_sat!=u:
 
-        # Hydrostatic quantities (Fossen 2021, Chapter 4)
-        Aw_pont = Cw_pont * self.L * self.B_pont  # waterline area, one pontoon
-        I_T = (
-            2
-            * (1 / 12)
-            * self.L
-            * self.B_pont ** 3
-            * (6 * Cw_pont ** 3 / ((1 + Cw_pont) * (1 + 2 * Cw_pont)))
-            + 2 * Aw_pont * y_pont ** 2
-        )
-        I_L = 0.8 * 2 * (1 / 12) * self.B_pont * self.L ** 3
-        KB = (1 / 3) * (5 * self.T / 2 - 0.5 * nabla / (self.L * self.B_pont))
-        BM_T = I_T / nabla  # BM values
-        BM_L = I_L / nabla
-        KM_T = KB + BM_T    # KM values
-        KM_L = KB + BM_L
-        KG = self.T - rg[2]
-        GM_T = KM_T - KG    # GM values
-        GM_L = KM_L - KG
+            integral_part=u_sat-proportion_part-u_kf
+        	
+        ### End of PID ###
 
-        G33 = rho * g * (2 * Aw_pont)  # spring stiffness
-        G44 = rho * g * nabla * GM_T
-        G55 = rho * g * nabla * GM_L
-        G_CF = np.diag([0, 0, G33, G44, G55, 0])  # spring stiff. matrix in CF
-        LCF = -0.2
-        H = Hmtrx(np.array([LCF, 0.0, 0.0]))  # transform G_CF from CF to CO
-        self.G = H.T @ G_CF @ H
-
-        # Natural frequencies
-        w3 = math.sqrt(G33 / self.M[2, 2])
-        w4 = math.sqrt(G44 / self.M[3, 3])
-        w5 = math.sqrt(G55 / self.M[4, 4])
-
-        # Linear damping terms (hydrodynamic derivatives)
-        Xu = -24.4 * g / Umax  # specified using the maximum speed
-        Yv = 0
-        Zw = -2 * 0.3 * w3 * self.M[2, 2]  # specified using relative damping
-        Kp = -2 * 0.2 * w4 * self.M[3, 3]
-        Mq = -2 * 0.4 * w5 * self.M[4, 4]
-        Nr = -self.M[5, 5] / T_yaw  # specified by the time constant T_yaw
-
-        self.D = -np.diag([Xu, Yv, Zw, Kp, Mq, Nr])
-
-        # Trim: theta = -7.5 deg corresponds to 13.5 cm less height aft
-        self.trim_moment = 0
-        self.trim_setpoint = 280
-
-        # Propeller configuration/input matrix
-        B = self.k_pos * np.array([[1, 1], [-self.l1, -self.l2]])
-        self.Binv = np.linalg.inv(B)
-
-        # Heading autopilot
-        self.e_int = 0  # integral state
-        self.wn = 1.2  # PID pole placement
-        self.zeta = 0.8
-
-        # Reference model
-        self.r_max = 10 * math.pi / 180  # maximum yaw rate
-        self.psi_d = 0  # angle, angular rate and angular acc. states
-        self.r_d = 0
-        self.a_d = 0
-        self.wn_d = self.wn / 5  # desired natural frequency in yaw
-        self.zeta_d = 1  # desired relative damping ratio
-
-
-    def dynamics(self, eta, nu, u_actual, u_control, sampleTime):
-        """
-        [nu,u_actual] = dynamics(eta,nu,u_actual,u_control,sampleTime) integrates
-        the Otter USV equations of motion using Euler's method.
-        """
-
-        # Input vector
-        n = np.array([u_actual[0], u_actual[1]])
-        #print('n:',n)
-        # Current velocities
-        u_c = self.V_c * math.cos(self.beta_c - eta[5])  # current surge vel.
-        v_c = self.V_c * math.sin(self.beta_c - eta[5])  # current sway vel.
-
-        nu_c = np.array([u_c, v_c, 0, 0, 0, 0], float)  # current velocity vector
-        nu_r = nu - nu_c  # relative velocity vector
-
-        # Rigid body and added mass Coriolis and centripetal matrices
-        # CRB_CG = [ (m+mp) * Smtrx(nu2)          O3   (Fossen 2021, Chapter 6)
-        #              O3                   -Smtrx(Ig*nu2)  ]
-        CRB_CG = np.zeros((6, 6))
-        CRB_CG[0:3, 0:3] = self.m_total * Smtrx(nu[3:6])
-        CRB_CG[3:6, 3:6] = -Smtrx(np.matmul(self.Ig, nu[3:6]))
-        CRB = self.H_rg.T @ CRB_CG @ self.H_rg  # transform CRB from CG to CO
-        # print('Crb',CRB_CG)
-        CA = m2c(self.MA, nu_r)
-        CA[5, 0] = 0  # assume that the Munk moment in yaw can be neglected
-        CA[5, 1] = 0  # if nonzero, must be balanced by adding nonlinear damping
-
-        self.C = CRB + CA
-        # Ballast
-        g_0 = np.array([0.0, 0.0, 0.0, 0.0, self.trim_moment, 0.0])
-        # Control forces and moments - with propeller revolution saturation
-        thrust = np.zeros(2)
-        for i in range(0, 2):
-
-            n[i] = sat(n[i], self.n_min, self.n_max)  # saturation, physical limits
-
-            if n[i] > 0:  # positive thrust
-                thrust[i] = self.k_pos * n[i] * abs(n[i])
-            else:  # negative thrust
-                thrust[i] = self.k_neg * n[i] * abs(n[i])
-
-        # Control forces and moments
-        tau = np.array(
-            [
-                thrust[0] + thrust[1],
-                0,
-                0,
-                0,
-                0,
-                -self.l1 * thrust[0] - self.l2 * thrust[1],
-            ]
-        )
+        # Return the parameters to access from outside for debug
+        self.err_now = err_now
         
-        # Hydrodynamic linear damping + nonlinear yaw damping
-        tau_damp = -np.matmul(self.D, nu_r)
-        tau_damp[5] = tau_damp[5] - 10 * self.D[5, 5] * abs(nu_r[5]) * nu_r[5]
-        # print('tau_damp',tau_damp)
-        # State derivatives (with dimension)
-        tau_crossflow = crossFlowDrag(self.L, self.B_pont, self.T, nu_r)
-        sum_tau = (
-            tau
-            + tau_damp
-            + tau_crossflow
-            - np.matmul(self.C, nu_r)
-            - np.matmul(self.G, eta)
-            - g_0
-        )
+        # Recursively state keeping
+        self.ref_pre = self.ref_now
+        self.system_output_pre = system_output
 
+        return u_sat
 
-        nu_dot = np.matmul(self.Minv, sum_tau)  # USV dynamics
+    def set_setpoint(self,reference):
+        '''
+            :function:  This function sets the reference signal and send to the controller
+            :params:    reference-Set the reference signal controller may be achieve
+        '''
+        self.ref_now = reference
 
-        n_dot = (u_control - n) / self.T_n  # propeller dynamics
-        trim_dot = (self.trim_setpoint - self.trim_moment) / 5  # trim dynamics
+    def integrate(self,err_pre,err,dt):
+        '''
+            :function:  integrate
+            :params:    err_pre-Error value one step before
+            :params:    err-Error value for now
 
-        # Forward Euler integration [k+1]
+            :return:    err_cum-Cumulative error with multiplied by Ki
 
-        nu = nu + sampleTime * nu_dot
-        n  = n + sampleTime * n_dot
-        self.trim_moment = self.trim_moment + sampleTime * trim_dot
-
-        u_actual = np.array(n, float)
-
-
-        return nu, u_actual
-
-
-    def initialize_otter(self, sample_time):
-        self.sample_time=sample_time
-        self.nu = np.array([0, 0, 0, 0, 0, 0], float)
-        self.u_actual = np.array([0, 0], float)
-        self.u_control = np.array([0, 0], float)
-        self.current_eta = np.array([10, 20, 0, 0, 0, 0], float)
-
-        return
-  
-
-    def stepInput(self, iteration, length):   #vehicle inputs 
-        """
-        u = stepInput(t) generates propeller step inputs.
-        """
-        n1 = 20.94# rad/s
-        n2 = -20.94# rad/s
-
-        # if iteration > int(length/2):
-        #     n1 = 50
-        #     n2 = 50
-        u_control = np.array([n1, n2], float)
-
-        return u_control
-##################################################################################################
-"""sampling time 0.1'den büyük olmamalı (default=0.02)
-    input değerleri
-    -------------------------
-    current_eta=6 DOF konumlar
-    nu=6 DOF hizlar
-    u_actual=pervane hizi rad/s pervane (modelinin çalışması için)
-    u_control=pervane hiz referans değeri rad/s
-    ****************
-    output değerleri
-    -------------------------------------------
-    current_eta: X-Y de hız grafilerini çizdirebilmek için
-    heading : anlık dünya koordinatına göre heading 
-    velocity: aracın gittiği u-v bileşke hızı
-    u-actual: pervane modelinin çalışması için sisteme tekrar girecek pervane rpm değeri
-    
-    """
-def start(steptime):
-    vehicle=Otter()
-    global current_eta
-    global nu
-    global u_actual
-    global u_control
-    global sampleTime
-    global speed
-    global heading
-    global pre_error_speed
-    global U_i
-    global saturation_limit_speed_max
-    global saturation_limit_speed_min
-    global U_sat_old
-    global pre_error_heading
-    global filtred_signal
-    global pre_speed_referans 
-    global prev_x
-    global prev_y
-    global prev_heading
-
-    prev_x = 0
-    prev_y = 0
-    prev_heading = 0
-    pre_speed_referans = 0
-    filtred_signal = 0 
-    saturation_limit_speed_max = 104
-    saturation_limit_speed_min = -104
-    U_sat_old = 0
-    U_i = 0
-    pre_error_speed = 0
-    pre_error_heading = 0
-
-    nu = np.array([0, 0, 0, 0, 0, 0], float)
-    u_actual = np.array([0, 0], float)
-    u_control = np.array([0, 0], float)           
-    current_eta = np.array([30, 30, 0, 0, 0, math.radians(10)], float)
-    heading=current_eta[5]*180/math.pi %360
-    speed = math.sqrt(nu[0]**2+nu[1]**2)
-    sampleTime=steptime
-    
-    return
-
-def function(u_control):
-    vehicle=Otter()
-    global current_eta
-    global nu
-    global u_actual
-    global sampleTime
-    global heading
-    global speed
-    
-
-    sampleTime=0.02
-    [nu, u_actual]=vehicle.dynamics(current_eta, nu, u_actual, u_control, sampleTime)
-    current_eta = attitudeEuler(current_eta, nu, sampleTime)
-    heading=current_eta[5]*180/math.pi %360
-    speed=math.sqrt(nu[0]**2+nu[1]**2)
-    # print('--------------------')
-
-    # output=[current_eta[0],current_eta[1],u_actual[0],u_actual[1],heading,nu]
-    output = [current_eta,nu,u_actual]
-    # time.sleep(sampleTime) # simulasyon süresi ayarlama
-    return output 
-
-def control_allocation(u_avr,u_diff):
-    max_frw_rpm = 104
-    max_rvs_rpm = -104
-    global u_control
-
-    if u_avr>max_frw_rpm:
-        u_avr=max_frw_rpm
-    elif u_avr<max_rvs_rpm:
-        u_avr=max_rvs_rpm
-    # print('u_avr---',u_avr)
-    n1=u_avr-u_diff
-    n2=u_avr+u_diff
-
-    if n1>max_frw_rpm:
-        n1=max_frw_rpm
-    if n1<max_rvs_rpm:
-        n1=max_rvs_rpm
-    if n2>max_frw_rpm:
-        n2=max_frw_rpm   
-    if n2<max_rvs_rpm:
-        n2=max_rvs_rpm
-
-    u_control=[n1,n2]
-    
-    return u_control
-
-def heading_control(setpoint):
-    global current_eta
-    global heading
-    global pre_error_heading 
-    global saturation_limit_speed_max
-    global saturation_limit_speed_min
-    global prev_heading
-    
-    feed_back = heading
-    error = setpoint-feed_back
-    if abs(error)<0.25:
-        error=0
-    print('error:',error)
-    
-    print('heading',feed_back)
-    while error<-180:
-        error = error +360
-    while error > 180:
-        error = error -360
-
-    
-    dt  = 0.02 
-    ## PID  
-    ## Proportion
-    Up = -7*error # 6
-
-    ## Derivative
-    # Ud = 10*(error-pre_error_heading)
-    Ud = 0*(current_eta[-1]-prev_heading) # Aracın açısal konum farkından deribvative etkisi sisteme eklenir. Derivative kick etkisini azaltmak için.
-    
-
-    ## Integral 
-    ki=125
-    Ui =  ki* (error+pre_error_speed)*dt
-
-    if Ui<saturation_limit_speed_max:
-            Ui = Ui+  ki* (error+pre_error_speed)*dt/2 
-    else :
-        pass           
-
-    ## control signal 
-    u_diff = Up+Ud+Ui
-    pre_error = error
-    heading=current_eta[5]*180/math.pi %360
-    print('pre error:',pre_error)
-    pre_error_heading=error
-    return u_diff,error
-
-# def heading_control(setpoint):
-#     global current_eta
-#     global heading
-
-#     feed_back = heading
-#     print('FEEDBACK',feed_back)
-#     print('HEADING',heading)
-#     error = setpoint-feed_back
-#     print('ERROR',error)
-#     while error<-180:
-#         error = error +360
-#     while error > 180:
-#         error = error -360
-
-#     Up = -5*error
-#     u_diff = Up
-
-#     heading=current_eta[5]*180/math.pi %360
-    
-
-#     return u_diff
-    # return 100
-
-
-
-
-
-def control_allocation(u_avr,u_diff):
-    max_frw_rpm = 104
-    max_rvs_rpm = -104
-    global u_control
-
-    if u_avr>max_frw_rpm:
-        u_avr=max_frw_rpm
-    elif u_avr<max_rvs_rpm:
-        u_avr=max_rvs_rpm
-    # print('u_avr---',u_avr)
-    n1=u_avr-u_diff
-    n2=u_avr+u_diff
-
-    if n1>max_frw_rpm:
-        n1=max_frw_rpm
-    if n1<max_rvs_rpm:
-        n1=max_rvs_rpm
-    if n2>max_frw_rpm:
-        n2=max_frw_rpm   
-    if n2<max_rvs_rpm:
-        n2=max_rvs_rpm
-
-    u_control=[n1,n2]
-    
-    return u_control
-
-
-def speed_control(set_point):
-    global nu
-    global pre_error_speed
-    global U_i
-    global saturation_limit_speed_max
-    global saturation_limit_speed_min
-    global U_sat_old
-    global prev_x
-    global prev_y
-    
-    vehicle_velocity=math.sqrt(nu[0]**2+nu[1]**2)
-    error=set_point-vehicle_velocity
-    if set_point==0:
-            set_point=0.0001
-    else:
+            Note :      Integration rule - Trapezoidal Rule
+        '''
+        # Check if the control signal saturated
+        if self.clamp == False:
+            # If saturation does not exist integrate the error term
+            self.err_cum += self.Ki*(err_pre+err)*dt/2
+        elif self.clamp == True:
+            # If saturation exists do not integrate the error term 
             pass
-    dt = 0.02
-    normal = 1
-    if abs(error)<0.15:
-        error=0
-    ## FPID
-    # Feedforward 
-    U_f = (3.684*set_point**3-23.44*set_point**2+67.35*set_point+12.3)
-    ## Proportion 
-    U_p = 25*error  # 3 default nolmal0 =3  nolmal1=
-    """p 12-20 yaptığımda control sinyali çıktısı değerinde aşım oluşmakta fakat hızlı bir oturma gerçekleşmektedir."""
-    print('U_proportion',U_p)
-    ## derivative 
-    # U_d = 5*(error-pre_error_speed)   # 1 default 
-    U_d = 0 * math.sqrt((prev_x-current_eta[0])**2+(prev_y-current_eta[1])**2) ## Konum farkları alınarak türev oluşturulur  
-                                                                               ## Derivative kick etkisini en aza indirmek için.
-    ## integral 
-    U_i = 125* (error+pre_error_speed)*dt/2  # 0.25 default nolmal0 =0.3  nolmal1=
-    """İntegrator değerini 1000 yaptığımızda kontrolcü sinyalınde aşım olmakta aynı zamanda hızlı bir şekilde ref. hıza oturmaktadır."""
-
-    if normal ==1:
-
-        if U_i<saturation_limit_speed_max:
-            U_i = U_i+  0.25* (error+pre_error_speed)*dt/2 
-
-        else :
-            pass
-        ## control signal
-            
-        u_avg = U_f+U_p+U_d+U_i
-        pre_error_speed=error
-        
-        return u_avg,error
-        
-
-    elif normal==0:
-        U_sat =U_sat_old + U_i
-        U_sat_old=U_sat
-        ## control signal 
-        u_avg = U_f+U_p+U_d+U_i+U_sat
- 
-        ## Saturation
-        U_filt=max(min(u_avg, saturation_limit_speed_max), saturation_limit_speed_min)
-        if u_avg!=U_filt:
-            U_sat_old = U_filt-U_p-U_f
-
-        pre_error_speed=error
-
-
-        return U_filt,error
+        return self.err_cum
     
-# def speed_control(set_point):
-
-#     global nu 
-#     vehicle_velocity=math.sqrt(nu[0]**2+nu[1]**2)
-#     error=set_point-vehicle_velocity
-#     if set_point==0:
-#             set_point=0.0001
-#     else:
-#             pass
-#     U_f = (3.684*set_point**3-23.44*set_point**2+67.35*set_point+12.3)
-#     U_p = 2.5*error
-#     u_avg = U_f+U_p
-#     # print('u_avg',u_avg)
-#     return u_avg
-
-def rampfunction(filtre_signal,u_control,prev_u_control,pp_u_control,inc_rate=1.25):
-    if prev_u_control==u_control:
+    def propotional(self,err):
+        '''
+            :function:  proportional
+                        This function multiplies error by Kp
             
-            pp_u_control = u_control
-    else:    
-        if prev_u_control<u_control:
-            print('*******')
-            if u_control-pp_u_control>0:
-                filtre_signal=filtre_signal+inc_rate
-                if filtre_signal>u_control:
-                     filtre_signal=u_control
+            :params:    err-Error for now
 
-        elif prev_u_control>u_control:
-            if u_control-pp_u_control>0:
-     
-                filtre_signal=filtre_signal-inc_rate
-                if filtre_signal<u_control:
-                     filtre_signal=u_control
-       
-    return  pp_u_control,filtre_signal,prev_u_control
-
-
-def filtred_referans(pre_speed_ref,speed_ref,filtred_signal,delta_rate=0.03):
-
-    if pre_speed_ref == filtred_signal:
-
-        pre_speed_ref = filtred_signal
-    else:
-        if filtred_signal<speed_ref:
-
-            filtred_signal = filtred_signal+delta_rate
-            if (abs(filtred_signal-pre_speed_ref))/(abs(speed_ref-pre_speed_ref))>0.6:
-                filtred_signal = filtred_signal+0.009
-            if filtred_signal>speed_ref:
-      
-                filtred_signal=speed_ref
-        elif filtred_signal>speed_ref:
-
-            filtred_signal = filtred_signal - delta_rate
+            :return:    self.Kp*err-Gained error value
+        '''
+        return self.Kp*err
+    
+    def in_proportional(self,err):
+        '''
+            :function:  proportional
+                        This function multiplies error by Kp
             
-            if filtred_signal<speed_ref:
-                filtred_signal=filtred_signal
+            :params:    err-Difference between control signal and
+                        system output.
 
+            :return:    self.Kp*err-Gained error value
+        '''
+        return self.Kp1*err
+
+
+    def derivate(self,pre_val,val,dt):
+        '''
+            :function:  This function takes the derivative of error or system output
+
+            :params:    pre_val-Previous state for numerical derivation.
+            :params:    val-Current value for derivation
+            :params:    dt-Sampling time.
+
+            :return:    Filtered derivative value.
+        '''
+        if self.derivative_filter_coefficient is not None:
+            deriv_out = (self.Kd*(val-pre_val)-self.deriv_filter_integral_cum)*self.derivative_filter_coefficient
+            self.deriv_filter_integral_cum += dt*deriv_out
+            print("Deriv filter int : {}".format(self.deriv_filter_integral_cum))
+
+            if dt > 0.0:
+                return deriv_out
+            else:
+                return 0.0
         else:
-            filtred_signal=speed_ref
+            if dt > 0.0:
+                return self.Kd*(val-pre_val)/dt
+            else:
+                return 0.0
 
-    
-
-    return filtred_signal
-
-def filtred_heading_referans(speed_ref,filtred_signal):
-
-
-    if speed_ref-filtred_signal<0:
-        if (speed_ref-filtred_signal)%360<(filtred_signal-speed_ref):
-
-            filtred_signal = filtred_signal+0.36
-            if filtred_signal>0:
-
-                if (-filtred_signal)%360>speed_ref:
-                    filtred_signal=speed_ref
-        elif  (speed_ref-filtred_signal)%360>(filtred_signal-speed_ref):
-
-            filtred_signal = filtred_signal - 0.36
-            if filtred_signal<0:
-                if (filtred_signal%360)>speed_ref:
-                    filtred_signal=speed_ref
-    elif speed_ref-filtred_signal>0:
-        if (speed_ref-filtred_signal)<(filtred_signal-speed_ref)%360:
-            filtred_signal = filtred_signal+0.36
-            if (filtred_signal)>0:
-                if filtred_signal>speed_ref:
-                    filtred_signal=speed_ref
-        elif  (speed_ref-filtred_signal)>(filtred_signal-speed_ref)%360:
-
-            filtred_signal = filtred_signal - 0.36
-            if filtred_signal<0:
-
-                if (filtred_signal%360)<speed_ref:
-                        filtred_signal=speed_ref
-        
-        
-    return filtred_signal
-
-
-
-
-
-    
-import math
-if __name__ == "__main__": 
-    dt =0.02
-   
-    start(0.02)
-
-    x_list=[]
-    y_list=[]
-    d_list=[]
-    init_heading=0.0
-    r_list=[]
-
-    prev_x=0
-    prev_y=0
-    
-    prev_heading=0
-    ds = 0.01 #[m]
-    v_list=[]
-    head_list=[]
-    timeotter = []
-    u_actual_list =[]
-    Time = 0
-    u_actual_list_sancak=[]
-    u_actual_list_iskele=[]
-    rad=100
-    r2rpmcoeff=0.104719755
-    command_speed = []
-    controlsignal_sancak = []
-    controlsignal_iskele = []
-    heading_list = []
-    heading_signal_list = []
-    yaw_speed = []
-    heading_ref = []
-    ramp_signal=0
-    Iramp_signal=0
-    Sramp_signal=0
-    Spp_u_control=0
-    Ipp_u_control=0
-    iramp_signal=0
-    sramp_signal=0
-    prev_u_control = [0,0]
-    pp_u_control = 0#[0,0]
-    prev_speed_ref = 0
-    prev_heading_ref = heading
-    filtred_signal = 0.1
-    heading_filtred_signal = 0.01
-    pre_speed = []
-    ref_list = []
-    speed_error_list = []
-    heading_error_list = []
- 
- 
-    for i in range(3000):
-
-        Time+=0.02
-        if i<500:
-            U_desired=1
-        elif 500<=i<1000:
-            U_desired=1.8
-        elif 1000<=i<1500:  
-            U_desired = 3
-        elif 1500<=i<2000:
-            U_desired = 1.25
-        elif 2000<=i<2500:
-            U_desired = 2
+    def reset_integral(self,u):
+        '''
+            :function:  reset_integral
+                        This function saturates the controller output.
+                        When the controller output is higher or lower than limits
+                        clamping flag rises and stops the integrating process.
+            
+            :params:    u-Controller signal
+            :return:    u-Saturated signal
+        '''
+        # Saturate the limit
+        if self.saturation_limit is not None and u>self.saturation_limit:
+            u = self.saturation_limit
+            # If saturation is observed, rise clamp flag
+            self.clamp = True
+        elif self.saturation_limit is not None and u<-self.saturation_limit:
+            u = -self.saturation_limit
+            self.clamp = True
         else:
-            U_desired = 0.1
+            self.clamp = False
+        self.u = u
+        return u
 
-        # if i<5:
-        #     heading_ref=50
-        # elif 5<=i<1000:
-        #     heading_ref=100
-        # elif 1000<=i<1500:  
-        #     heading_ref = 20
-        # elif 1500<=i<2000:
-        #     heading_ref = 60
-        # elif 2000<=i<2500:
-        #     heading_ref = 10
-        # else:
-        #     heading_ref =30
-        
-        # else:
-        #     U_desired=30*math.sin(0.005*i)
-        #     if U_desired<=0:
-        #         U_desired=abs(U_desired)
-        
-        
+    '''
+        Ocean current balancer.
+    '''
+    def wave_current_to_amplitude(self):
+        pass
 
-        # U_desired = 0
-        heading_ref = 50
-        
-        filtred_signal= filtred_referans(prev_speed_ref,U_desired,filtred_signal)
-        heading_filtred_signal= filtred_heading_referans(heading_ref,heading_filtred_signal)
-        prev_speed_ref = U_desired
-         
-        prev_x = current_eta[0]
-        prev_y = current_eta[1]
-        prev_heading = current_eta[-1]
-        pre_speed_ref=U_desired
-        pre_speed.append(pre_speed_ref)
-        u_avg,error_speed  = speed_control(filtred_signal)  # linear speed control
-        heading_signal,error_heading = heading_control(heading_filtred_signal)
-        u_control = control_allocation(u_avg,0)
+    def response_amplitude_operator(self):
+        '''
+            :function:      response_amplitude_operator: RAO operator to estimate 
+                            the wave forces impact to the USV according to the wave
+                            amplitude. Controller has to compansate the 
+            
+            :return:        wave_force_est: Estimated wave forces.
+        '''
+        wave_force_est = None
+        return wave_force_est
+    @property
+    def see_err(self):
+        return self.err_now
 
+    @property
+    def debugger(self):
+        '''
+            :property:  debugger-See all current and memorized data in controller.
+        '''
+        debug_vals = {
+            "clamp"                 :   self.clamp,
+            "err_now"               :   self.err_now,
+            "err_cum"               :   self.err_cum,
+            "ctrl_output"           :   self.u,
+            "acc_feedback_gain"     :   self.Ag,
+            #"saturation_limit"      :   self.saturation_limit,
+            #"reference_now"         :   self.ref_now,
+            #"reference_pre"         :   self.ref_pre,
+            #"sys_out_pre"           :   self.system_output_pre,
+            #"sys_out_now"           :   self.system_output,
+            "Kp,Ki,Kd,Kp1"          :   (self.Kp,self.Ki,self.Kd,self.Kp1),
+            "derivative_filter_coef":   self.derivative_filter_coefficient,
+        }
+        return debug_vals
+    @property
+    def get_lib_usage(self):
+        lib_usage = "Explanation of PID library for USV's \
+            First you need to construct the class in your code. Constructor takes the parameters as: \
+            Kp,Ki,Kd as basic PID parameters and Kp1 for PIDP structure. In PIDP you first close \
+            the loop with just P type controller to make the systm faster and close the second loop with PID \
+            to force the system to act as desired. In derivative feedbak structure D type controller is \
+            on the negative feedback way. To reduce the derivative gain set derivative feedback coefficient \
+            this coefficient reduces the gain in high frequencies. Inner-loop P controller exist ot not parameters will be set \
+            default is false. Set the saturation limit the save the actuators life and give the inputs on limits \
+            This parameters automaticly set the anti-windup structure as clamping. If there is a wind sensor \
+            you can calculate the wind effect in units of moment or forces and add into the system. Kf is feedforward \
+            gain. Set the gain as de"
+        return lib_usage
 
-        u_control = [104,104 ]
-        output=function(u_control) # runnig dynamic model of usv (otter)
-        # prev_u_control=u_control
-        
- 
-        u_actual_list_sancak.append(output[2][0])
-        u_actual_list_iskele.append(output[2][1])
-
-        # command_speed.append(0.0002786*u_control[0]**2+0.0005187*u_control[0]-0.00461)
-        command_speed.append(filtred_signal)
-        v_list.append(np.sqrt(nu[0]**2+nu[1]**2))  # for plotting
-        heading_list.append(current_eta[5]*180/math.pi %360) # for plotting
-        heading_signal_list.append(heading_filtred_signal)
-        x_list.append(current_eta[0]) # for plotting 
-        y_list.append(current_eta[1]) # for plotting 
-        yaw_speed.append(nu[5])
-        # u_control=[-70,100]
-        controlsignal_sancak.append(u_control[0])
-        controlsignal_iskele.append(u_control[1])
-        heading_error_list.append(error_heading)
-        speed_error_list.append(error_speed)    
-        timeotter.append(Time)
-
-                
-    import matplotlib.pyplot as plt 
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-    # plt.plot(speed_error_list)
-    # # plt.plot(timeotter,yaw_speed)
-    # plt.show()
-    fig = go.Figure()
-    fig = make_subplots(rows=4, cols=1)
-    # Add traces
-    fig.add_trace(go.Scatter(x=timeotter, y=v_list,
-                        mode='lines',
-                        name='araç hiz'),row=1, col=1)
-    fig.add_trace(go.Scatter(x=timeotter, y=command_speed,
-                        mode='lines',
-                        name='cmd hiz'),row=1, col=1)
-
-    
-
-    fig.add_trace(go.Scatter(x=timeotter, y=speed_error_list,
-                        mode='lines',
-                        name='speed error'),row=1, col=1)
-
-    fig.add_trace(
-        go.Scatter(x=timeotter, y=u_actual_list_sancak,name=' Sancak pervane'),row=2, col=1
-        )
-    
-    fig.add_trace(
-        go.Scatter(x=timeotter, y=u_actual_list_iskele,name='İskele Pervane'),
-        row=2, col=1)
-
-    fig.add_trace(
-        go.Scatter(x=timeotter, y=controlsignal_sancak,name='control signali_sancak'),
-        row=2, col=1)
-    
-    fig.add_trace(
-        go.Scatter(x=timeotter, y=controlsignal_iskele,name='control signali_iskele'),
-        row=2, col=1)
-
-    
-
-    fig.add_trace(
-        go.Scatter(x=timeotter, y=heading_signal_list,name='heading referans signali'),
-        row=3, col=1)
-    
-    fig.add_trace(
-        go.Scatter(x=timeotter, y=heading_error_list,name='heading error'),
-        row=3, col=1)
-
-    fig.add_trace(
-    go.Scatter(x=timeotter, y=heading_list,name='heading otter'),
-    row=3, col=1)
-
-    fig.add_trace(
-        go.Scatter(x=x_list, y=y_list,name='x-y pervane'),row=4, col=1
-        )
-    fig.update_layout( title_text="Sinus referansi")
-    # plotly.offline.plot(fig, filename="Kare1.5-2.2-2.html")
-
-    fig.show()
