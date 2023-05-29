@@ -13,6 +13,6 @@ MPC structure was implemented using the CasADi optimization tools. CasADi provid
 
 The flow chart of the kinodynamic RRT algorithm used for path planning is shown in the figure 2.
 
-|<img src=![RRTFlowChart](https://github.com/ferhannb/Otter_USV_Path_Following/assets/29739404/60fde4e9-d44b-49a6-851c-90154b414164) width="600" height="600"/>|
+|<img src=![RRTFlowChart](https://github.com/ferhannb/Otter_USV_Path_Following/assets/29739404/60fde4e9-d44b-49a6-851c-90154b414164) />|
 |:--:| 
 | **Figure 2** |
