@@ -27,4 +27,6 @@ Casadi sutructure of MPC algorithm is shown figure 3. By establishing this block
 | **Figure 3** |
 
 ## Simulation scanerio
+In order to test the performance of this algorithm, a path was generated with kinodynamic RRT in variousenvironments and this path was followed by MPC.
+
 
