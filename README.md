@@ -17,4 +17,5 @@ The flow chart of the kinodynamic RRT algorithm used for path planning is shown 
 |:--:| 
 | **Figure 2** |
 
-In Path following part, Referances values for path following comes from the path is created by path generation algorithm ($x_{ref},y_{ref} and \psi_{ref}$) and assigned surge velocity and yaw angular rate (u,r)   
+In Path following part, Referances values for path following comes from the path is created by path generation algorithm ($x_{ref},y_{ref} \quad and  \quad \psi_{ref}$) and assigned surge velocity and yaw angular rate (u,r)  give to cost function of MPC as target values so generated path is followed. The reference values to be given to the MPC algorithm are the position values of the points determined on the path and the reference speeds at those points.
+
