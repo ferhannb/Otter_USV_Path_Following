@@ -19,7 +19,8 @@ The flow chart of the kinodynamic RRT algorithm used for path planning is shown 
 
 In Path following part, Referances values for path following comes from the path is created by path generation algorithm ($x_{ref},y_{ref} \quad and  \quad \psi_{ref}$) and assigned surge velocity and yaw angular rate (u,r)  give to cost function of MPC as target values so generated path is followed. The reference values to be given to the MPC algorithm are the position values of the points determined on the path and the reference speeds at those points.
 
-Casadi sutructure of MPC algorithm is shown figure 3. 
+Casadi sutructure of MPC algorithm is shown figure 3. By establishing this block structure in the casadi, which is shown in the picture, the optimizaton algorithm of the MPC is established. The solution of this structure is solved according to the instant states of the system at the determined time intervals and the optimum input signals are determined.
+
 
 |![GNCDiagram](https://github.com/ferhannb/Otter_USV_Path_Following/blob/master/CasadiDiagram.png)|
 |:--:| 
