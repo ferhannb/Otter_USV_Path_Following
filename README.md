@@ -17,4 +17,4 @@ The flow chart of the kinodynamic RRT algorithm used for path planning is shown 
 |:--:| 
 | **Figure 2** |
 
-In Path following part, Referances values for path following comes from the path is created by path generation algorithm (x_ref,y_ref and \psi_{ref}) and assigned surge velocity and yaw angular rate (u,r)   
+In Path following part, Referances values for path following comes from the path is created by path generation algorithm ($x_ref,y_ref and \psi_{ref}$) and assigned surge velocity and yaw angular rate (u,r)   
