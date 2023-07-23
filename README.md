@@ -1,4 +1,4 @@
-# Path Following of Otter USV 
+# Path Following of Otter USV using model predictive control (MPC)
 
 This project consist my master thesis research about path following of Otter surface vehicle that is developed by maritime robotic AS. In this study, the trajectory generated using kinodynamic RRT will be tracked using the Model Predictive Control (MPC) In autonomous systems, the vehicle's route planning and trajectory tracking systems are controlled by the Guidance, Navigation, and Control (GNC) architecture. The block diagram of this structure is depicted in the figure 1.
 
