@@ -21,5 +21,8 @@ In Path following part, Referances values for path following comes from the path
 
 Casadi sutructure of MPC algorithm is shown figure 3. 
 
+|![GNCDiagram](https://github.com/ferhannb/Otter_USV_Path_Following/blob/master/CasadiDiagram.png)|
+|:--:| 
+| **Figure 3** |
 
 
